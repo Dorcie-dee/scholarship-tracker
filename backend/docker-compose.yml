@@ -1,0 +1,25 @@
+# Optional local PostgreSQL for development.
+#
+# This app does NOT require Docker — a local PostgreSQL install works just as
+# well (see ../docs/development.md). This file is provided for convenience if
+# you'd rather run Postgres in a container instead of installing it natively.
+#
+#   docker compose up -d
+#
+# Then point your .env at localhost:5432 with the credentials below (they
+# match sample.env's defaults).
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scholarship_os
+      POSTGRES_PASSWORD: scholarship_os_dev_password
+      POSTGRES_DB: scholarship_os_dev
+    ports:
+      - '5432:5432'
+    volumes:
+      - scholarship_os_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  scholarship_os_postgres_data:

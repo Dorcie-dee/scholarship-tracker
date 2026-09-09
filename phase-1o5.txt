@@ -1,0 +1,1440 @@
+The Phase 1 foundation build is complete.
+
+Before continuing, I want to change the operating rules for how you work on this project.
+
+This project is intended to become a serious, high-quality software product. "The code works" is NOT by itself an acceptable quality standard.
+
+We care about:
+
+- correctness
+- efficient database access
+- predictable application behaviour
+- maintainability
+- scalability
+- security
+- clean architecture
+- minimizing unnecessary network/database round trips
+- minimizing unnecessary computation
+- avoiding redundant queries
+- avoiding duplicated business logic
+- measurable performance
+- clear reasoning behind architectural decisions
+
+I also want you to work in a permission-gated manner.
+
+==================================================
+0. IMPORTANT: PERMISSION-GATED DEVELOPMENT MODE
+==================================================
+
+From this point onward, do NOT execute implementation tasks continuously without my confirmation.
+
+You may inspect/read/analyse the existing project when necessary to understand what is already there.
+
+However, BEFORE performing any action that changes the project or its environment, ask me for confirmation.
+
+This includes, but is not limited to:
+
+- creating a file
+- modifying a file
+- deleting a file
+- renaming a file
+- installing a dependency
+- removing a dependency
+- changing package.json
+- changing database schema
+- generating a migration
+- running a migration
+- inserting/modifying/deleting database data
+- running a seed operation
+- modifying environment/configuration files
+- starting a server
+- stopping/restarting a server
+- running commands that modify the environment
+- changing authentication logic
+- changing API logic
+- changing frontend logic
+- changing database queries
+- refactoring existing code
+- changing architectural decisions
+
+Do NOT group many implementation actions under one vague permission request.
+
+Instead, work in small logical checkpoints.
+
+For example:
+
+"Checkpoint 1: I have inspected the Application service. I found that getApplicationDetails() currently performs 4 sequential database queries. I propose consolidating this into one optimized query using appropriate relations/query builder. May I modify this service?"
+
+Wait for my answer.
+
+Then perform only that approved action.
+
+After completing it, report:
+
+- what you changed
+- why
+- files changed
+- database queries before
+- database queries after
+- expected impact
+- tests/verification performed
+- any remaining concern
+
+Then ask for permission for the next discrete change.
+
+This is mandatory.
+
+I want to see where the project is progressing rather than having you silently execute a long chain of changes.
+
+==================================================
+1. QUALITY CODE IS A REQUIREMENT
+==================================================
+
+Do NOT optimize merely for "the endpoint returns the correct response."
+
+An endpoint can technically work while still being poor-quality engineering.
+
+For example, avoid inefficient service logic such as:
+
+request
+ ↓
+DB query
+ ↓
+another DB query
+ ↓
+another DB query
+ ↓
+another DB query
+ ↓
+combine results in JavaScript
+
+when the same result can reasonably be obtained through:
+
+- one well-designed query
+- appropriate joins
+- TypeORM relations
+- QueryBuilder
+- batching
+- carefully designed projections/selects
+- appropriate indexes
+- or another clearly justified approach.
+
+However, do NOT blindly force everything into one enormous query either.
+
+The objective is:
+
+OPTIMAL DATABASE ACCESS
+
+not:
+
+"Always exactly one query."
+
+Use engineering judgement.
+
+==================================================
+2. DATABASE ROUND-TRIP DISCIPLINE
+==================================================
+
+For every nontrivial service method or endpoint, inspect how many database queries it causes.
+
+I want you to actively identify:
+
+- N+1 query patterns
+- repeated queries for the same entity
+- redundant existence checks
+- unnecessary sequential queries
+- loading entire entities when only a few fields are needed
+- fetching related data separately when a join/relation could reasonably handle it
+- unnecessary save() calls
+- unnecessary reloads after save()
+- redundant count queries
+- redundant transactions
+- queries that could be combined
+- queries that could be parallelized where appropriate
+- unnecessary application-side filtering when PostgreSQL can efficiently filter it
+
+Do not assume that because TypeORM abstracts SQL, the database cost is irrelevant.
+
+TypeORM code must still be evaluated based on the SQL/database behaviour it produces.
+
+==================================================
+3. PERFORMANCE MUST BE CONSIDERED IN EVERY SERVICE
+==================================================
+
+For every meaningful service function, ask:
+
+1. How many DB round trips does this require?
+2. Is every query necessary?
+3. Can any queries be combined?
+4. Can independent queries safely execute in parallel?
+5. Is the query retrieving more data than necessary?
+6. Are appropriate indexes available?
+7. Could this become an N+1 problem as data grows?
+8. Is there unnecessary object transformation?
+9. Is there unnecessary network traffic?
+10. Is the operation inside an appropriate transaction where required?
+11. Is the transaction unnecessarily large?
+12. Is the operation idempotent where appropriate?
+13. What happens when the dataset grows from 10 records to 10,000 or 1,000,000 records?
+
+Milliseconds matter.
+
+Database calls, network round trips, serialization, memory use and unnecessary computation all contribute to the quality and reliability of the platform.
+
+Do not prematurely optimize microscopic operations where there is no meaningful benefit.
+
+But do not ignore obviously inefficient database access.
+
+Use evidence and reasoning.
+
+
+==================================================
+4. SERVICES WITH MULTIPLE FUNCTIONS
+==================================================
+
+If a service contains more than two meaningful functions, review the functions individually.
+
+Do not automatically create multiple DB calls just because the code has been split into helper functions.
+
+For example, avoid:
+
+createApplication()
+    ↓
+checkUser()
+    ↓ DB query
+
+checkOpportunity()
+    ↓ DB query
+
+checkJourney()
+    ↓ DB query
+
+saveApplication()
+    ↓ DB query
+
+when the necessary information could reasonably be obtained more efficiently.
+
+At the same time, do not combine unrelated responsibilities into one massive function merely to reduce query count.
+
+Maintainability and performance must both be considered.
+
+If there is a trade-off, explain it to me before making the change.
+
+
+==================================================
+5. QUERY PERFORMANCE REPORTING
+==================================================
+
+When you identify a meaningful database operation, report the expected query behaviour.
+
+For example:
+
+BEFORE:
+
+getApplicationDetails()
+
+1. SELECT application
+2. SELECT journey
+3. SELECT opportunity
+4. SELECT requirements
+5. SELECT tasks
+
+5 DB round trips.
+
+AFTER:
+
+A properly designed query/relation strategy retrieves the necessary information with fewer round trips.
+
+Explain:
+
+- why the change is safe
+- what data is being retrieved
+- why the query is preferable
+- whether indexes are required
+- any trade-offs
+
+Do not fabricate exact millisecond improvements unless you actually measured them.
+
+If performance has not been benchmarked, say:
+
+"Expected improvement based on reduced DB round trips; not benchmarked yet."
+
+==================================================
+6. AUTHENTICATION MUST BE FUNCTIONAL, NOT JUST SCAFFOLDED
+==================================================
+
+Authentication must work as a real user would expect.
+
+Implement and verify the authentication foundation carefully.
+
+At minimum:
+
+Registration
+Login
+Logout
+Refresh
+Logout-all
+Authenticated user/me
+Password hashing
+Session management
+Refresh-token rotation
+Refresh-token revocation
+
+But authentication must also support proper account verification.
+
+==================================================
+7. EMAIL / OTP VERIFICATION
+==================================================
+
+The registration process should be designed to support proper email verification.
+
+For a new signup, the expected future/user flow should be:
+
+User enters:
+
+- name
+- email
+- password
+- password confirmation
+
+        ↓
+
+Account created in an appropriate pending/unverified state
+
+        ↓
+
+Verification OTP generated
+
+        ↓
+
+OTP sent to user's email
+
+        ↓
+
+User enters OTP
+
+        ↓
+
+OTP validated
+
+        ↓
+
+Email verified
+
+        ↓
+
+Account activated/verified
+
+        ↓
+
+User can proceed into the authenticated application
+
+Implement the OTP verification foundation now if the required email infrastructure can be reasonably configured.
+
+If actual email delivery requires credentials/provider configuration that is not currently available, DO NOT fake the email delivery.
+
+Instead:
+
+- implement the correct verification domain/state
+- implement OTP generation/storage/expiry/security
+- implement verification endpoint
+- implement resend verification endpoint if appropriate
+- clearly document the missing email provider configuration
+- use a development-safe mechanism only if explicitly documented and not presented as production email delivery
+
+Never log OTPs in production-style logs.
+
+OTP requirements should include:
+
+- expiration
+- single-use behaviour
+- attempt limitations
+- secure storage
+- resend throttling
+- invalidation after successful verification
+- protection against brute-force attempts
+
+Do not store plaintext OTP values if a secure hashed approach is appropriate.
+
+==================================================
+8. PASSWORD RESET
+==================================================
+
+The authentication foundation should also be structured to support:
+
+Forgot password
+    ↓
+Email verification/OTP or secure reset mechanism
+    ↓
+New password
+    ↓
+Existing authentication sessions handled appropriately
+
+If you determine password reset should be included in this validation phase, propose the exact scope first and ask for permission before implementing it.
+
+Do not silently add a large password recovery subsystem without approval.
+
+
+==================================================
+9. AUTHENTICATION SECURITY
+==================================================
+
+Continue using:
+
+- bcrypt/password hashing
+- short-lived access tokens
+- refresh tokens
+- refresh-token rotation
+- refresh-token revocation
+- secure HttpOnly refresh cookie
+- protected NestJS routes
+- DTO validation
+- CORS configuration
+- environment-based secrets
+
+Do NOT:
+
+- store refresh tokens in localStorage
+- store plaintext passwords
+- expose password hashes
+- expose raw refresh tokens unnecessarily
+- hard-code secrets
+- hard-code personal credentials
+
+==================================================
+10. TESTING POLICY — IMPORTANT
+==================================================
+
+Use Jest.
+
+Continue using:
+
+Test.createTestingModule(...)
+
+Meaningful unit tests are required.
+
+However:
+
+DO NOT RUN E2E TESTS.
+
+Do not execute:
+
+yarn workspace api test:e2e
+
+Do not start or execute the e2e suite unless I explicitly give permission in a later instruction.
+
+You may inspect existing e2e test files.
+
+You may create or update e2e tests if required by the architecture and approved by me.
+
+But do NOT execute them.
+
+For this phase, focus on:
+
+- Jest unit tests
+- service-level behaviour
+- authentication unit tests
+- database/service logic tests where appropriate
+- static/build verification where approved
+
+==================================================
+11. UNIT TEST QUALITY
+==================================================
+
+Do not write meaningless tests simply to increase coverage.
+
+Use:
+
+Test.createTestingModule(...)
+
+Test actual behaviour.
+
+Examples:
+
+Authentication:
+
+- registration
+- duplicate email
+- password hashing
+- login
+- invalid credentials
+- refresh rotation
+- revoked session
+- expired session
+- logout
+- logout-all
+- OTP validation
+- expired OTP
+- invalid OTP
+- OTP reuse
+- verification state
+
+Domain:
+
+- Application Journey creation
+- Application creation
+- requirements
+- deadlines
+- dependency status
+- document versioning
+- application snapshots
+- user ownership/isolation
+
+==================================================
+12. USER DATA ISOLATION
+==================================================
+
+Create/test a clear ownership model.
+
+User A must never be able to retrieve or modify User B's private:
+
+- ApplicantProfile
+- Journeys
+- Applications
+- Tasks
+- Documents
+- Requirements where user-specific
+- Deadlines where user-specific
+- ApplicationSnapshots
+- other private records
+
+Pay particular attention to:
+
+GET /api/applications/:id
+
+GET /api/journeys/:id
+
+GET /api/documents/:id
+
+and similar ID-based endpoints.
+
+Never assume possession of an ID means authorization.
+
+
+==================================================
+13. APPLICATION JOURNEY VALIDATION
+==================================================
+
+Validate:
+
+University
+    ↓
+Programme
+    ↓
+Application Journey
+    ↓
+Applications
+
+using:
+
+University of Twente
+    ↓
+MSc Computer Science
+    ↓
+MSc Computer Science — University of Twente
+    ├── Admission
+    ├── University Twente Scholarship
+    └── Other Funding
+
+Confirm that the API and frontend represent this correctly.
+
+
+==================================================
+14. DOCUMENT VERSIONING VALIDATION
+==================================================
+
+Validate:
+
+CV v1
+    ↓
+Application A
+
+CV v2
+    ↓
+Application B
+
+Then change/create:
+
+CV v3
+
+Confirm historical references remain intact.
+
+Application A must still point to CV v1.
+
+Application B must still point to CV v2.
+
+The current document may become CV v3.
+
+Do not allow historical application records to silently change.
+
+
+==================================================
+15. APPLICATION SNAPSHOT VALIDATION
+==================================================
+
+Validate:
+
+Master Profile
+        ↓
+Application Snapshot
+
+Create a snapshot.
+
+Then modify:
+
+- profile
+- CV
+- skills
+- education
+- written information
+
+The historical snapshot must remain unchanged.
+
+This is one of the core architectural guarantees of the platform.
+
+
+==================================================
+16. REQUIREMENTS VALIDATION
+==================================================
+
+Test realistic requirements:
+
+- Academic Transcript
+- CV
+- Motivation Letter
+- Recommendation Letter
+- English Language Evidence
+
+Confirm statuses work.
+
+Confirm requirements do not technically block users.
+
+
+==================================================
+17. HARD/SOFT DEPENDENCY VALIDATION
+==================================================
+
+Test:
+
+Task A:
+Prepare motivation letter
+
+Task B:
+Upload motivation letter
+
+Task B depends on Task A.
+
+Test:
+
+HARD
+
+and:
+
+SOFT
+
+In both cases the system may warn/inform the user.
+
+But it must NEVER prevent the user from continuing.
+
+This is a core product principle.
+
+
+==================================================
+18. DEADLINE VALIDATION
+==================================================
+
+Test multiple deadlines for a journey/application:
+
+- university application deadline
+- scholarship deadline
+- recommendation deadline
+- programme start
+
+Confirm correct associations.
+
+Do NOT implement intelligent reminders yet.
+
+
+==================================================
+19. OPPORTUNITY/SOURCE VALIDATION
+==================================================
+
+Validate the relationship:
+
+Opportunity
+    ↓
+OpportunitySource
+
+Ensure we can preserve useful source information without attempting to store entire external websites.
+
+Do NOT implement AI extraction or URL ingestion yet.
+
+
+==================================================
+20. DATABASE AUDIT
+==================================================
+
+Inspect the actual PostgreSQL schema.
+
+Review:
+
+- primary keys
+- foreign keys
+- indexes
+- unique constraints
+- nullability
+- cascade behaviour
+- timestamp handling
+- enums
+- JSONB
+- query patterns
+- ownership
+- transaction boundaries
+
+Pay particular attention to:
+
+User
+ApplicantProfile
+RefreshSession
+University
+Programme
+Opportunity
+OpportunitySource
+Requirement
+Deadline
+ApplicationJourney
+Application
+Task
+Document
+ApplicationDocument
+ApplicationSnapshot
+
+If you believe a schema change is necessary, STOP and ask for permission before modifying it.
+
+
+==================================================
+21. API AUDIT
+==================================================
+
+Review the existing API.
+
+Check:
+
+- DTO validation
+- authentication
+- authorization
+- ownership
+- status codes
+- error handling
+- pagination
+- query efficiency
+- unnecessary DB calls
+- duplicate business logic
+
+If a meaningful API redesign appears necessary:
+
+DO NOT automatically implement it.
+
+Explain:
+
+1. Existing design
+2. Problem
+3. Proposed change
+4. Why the change is necessary
+5. Alternatives considered
+6. Database/query impact
+7. API compatibility impact
+8. Future architecture impact
+
+Then ask for permission.
+
+==================================================
+22. FRONTEND AUDIT
+==================================================
+
+Review:
+
+/login
+/register
+/dashboard
+/opportunities
+/journeys
+/journeys/[id]
+/applications
+/applications/[id]
+/tasks
+/documents
+/profile
+
+Check:
+
+- loading states
+- error states
+- empty states
+- authentication behaviour
+- navigation
+- API integration
+- form validation
+- whether important information is understandable
+
+Do not redesign the complete UI yet.
+
+If a meaningful UX problem requires code changes, identify it and ask permission before modifying it.
+
+
+==================================================
+23. NO BLIND REFACTORING
+==================================================
+
+Do not refactor code merely because you prefer a different style.
+
+Only change existing working code when there is a meaningful reason such as:
+
+- correctness
+- security
+- performance
+- maintainability
+- architectural consistency
+- preventing future bugs
+- removing duplication
+- reducing unnecessary DB/network operations
+
+Every such change must be explained.
+
+
+==================================================
+24. CHANGE ACCOUNTABILITY
+==================================================
+
+This is mandatory.
+
+Every modification made during this phase must be recorded.
+
+Create/update:
+
+docs/validation.md
+
+and maintain a change log section containing:
+
+Change ID
+Date
+File(s)
+What changed
+Why it changed
+Problem being solved
+Previous behaviour
+New behaviour
+Database impact
+API impact
+Frontend impact
+Performance impact
+Security impact
+Tests/verification
+Whether the change is reversible
+Whether the change affects future phases
+
+Example:
+
+CHANGE-001
+
+File:
+apps/api/src/applications/applications.service.ts
+
+Problem:
+Application retrieval caused 4 sequential DB queries.
+
+Change:
+Consolidated related retrieval using an optimized TypeORM query strategy.
+
+Reason:
+Reduce unnecessary database round trips.
+
+Before:
+4 DB queries
+
+After:
+2 DB queries
+
+Verification:
+Unit tests passed.
+
+Future impact:
+No API contract change.
+
+This record is extremely important because I will review these changes externally before we proceed.
+
+
+==================================================
+25. DO NOT HIDE CHANGES
+==================================================
+
+At the end, tell me EVERY file changed during this validation phase.
+
+Do not only list major files.
+
+Include:
+
+- source files
+- migrations
+- configuration
+- package files
+- documentation
+- tests
+- seed files
+
+If a file was changed for a small reason, list it.
+
+
+==================================================
+26. ARCHITECTURAL DECISION RECORDS
+==================================================
+
+For any significant architectural decision, record:
+
+Decision
+Context
+Options considered
+Chosen approach
+Reason
+Trade-offs
+Future implications
+
+Update:
+
+docs/decisions.md
+
+Do not silently make architectural decisions.
+
+
+==================================================
+27. OFFICIAL VALIDATION DOCUMENT
+==================================================
+
+At the end of the validation phase, create a proper formal document:
+
+docs/Phase-1.5-Foundation-Validation-Report.md
+
+It must contain:
+
+1. Executive Summary
+2. Scope
+3. Environment
+4. Architecture Reviewed
+5. Authentication Review
+6. OTP/Verification Review
+7. Database Review
+8. Query Efficiency Review
+9. API Review
+10. User Isolation Review
+11. Application Journey Review
+12. Requirement Review
+13. Dependency Review
+14. Deadline Review
+15. Document Versioning Review
+16. Application Snapshot Review
+17. Frontend Review
+18. Testing Review
+19. Changes Made
+20. Architectural Decisions
+21. Known Issues
+22. Deferred Issues
+23. Performance Considerations
+24. Security Considerations
+25. Future Phase Considerations
+26. Final Recommendation
+
+Use clear professional language.
+
+Include simple explanations where technical terminology is necessary.
+
+==================================================
+28. DOWNLOADABLE OFFICIAL DOCUMENT
+==================================================
+
+The final Phase-1.5 validation report must also be generated as a proper downloadable document that I can open and review outside the terminal.
+
+Preferred format:
+
+DOCX
+
+If DOCX generation cannot be performed directly from your environment, clearly tell me and provide the Markdown version instead rather than pretending a DOCX was generated.
+
+The document should be professionally structured with:
+
+- title
+- date
+- project name
+- executive summary
+- numbered sections
+- tables where useful
+- change log
+- architectural decisions
+- test results
+- known issues
+- recommendations
+
+Do not put secrets, passwords, tokens or sensitive credentials into the document.
+
+
+==================================================
+29. TERMINAL SUMMARY
+==================================================
+
+In addition to the official document, provide me with a detailed terminal summary.
+
+The terminal summary must include:
+
+A. Overall status
+
+B. What was inspected
+
+C. What was changed
+
+D. Why each change was made
+
+E. Files changed
+
+F. Database changes
+
+G. API changes
+
+H. Frontend changes
+
+I. Authentication changes
+
+J. OTP changes
+
+K. Performance/query findings
+
+L. Tests executed
+
+M. Tests NOT executed
+
+N. Known issues
+
+O. Architectural concerns
+
+P. Next recommended step
+
+Q. Anything you believe I should send to another technical reviewer for verification
+
+
+==================================================
+30. VERY IMPORTANT — DO NOT EXECUTE E2E TESTS
+==================================================
+
+Again:
+
+DO NOT RUN E2E TESTS.
+
+Do not execute:
+
+yarn workspace api test:e2e
+
+Do not start an e2e environment.
+
+Do not execute browser automation.
+
+If you believe e2e testing is necessary, report that it is recommended and WAIT for my explicit permission.
+
+
+==================================================
+31. PERMISSION CHECKPOINT FORMAT
+==================================================
+
+Before every modification, use this format:
+
+CHECKPOINT: [number]
+
+Proposed action:
+[exact action]
+
+Reason:
+[why it is necessary]
+
+Files affected:
+[list]
+
+Database impact:
+[none / describe]
+
+API impact:
+[none / describe]
+
+Performance impact:
+[describe]
+
+Security impact:
+[describe]
+
+Tests/verification planned:
+[list]
+
+Risk:
+[low / medium / high]
+
+May I proceed?
+
+Then WAIT.
+
+Do not proceed until I explicitly approve.
+
+After approval and completion, report:
+
+COMPLETED CHECKPOINT: [number]
+
+Changed:
+[...]
+
+Reason:
+[...]
+
+Verification:
+[...]
+
+Query/DB impact:
+[...]
+
+Files changed:
+[...]
+
+Remaining concerns:
+[...]
+
+Then request permission for the next checkpoint.
+
+
+==================================================
+32. FIRST ACTION
+==================================================
+
+For now, DO NOT MODIFY ANYTHING.
+
+Your first action should ONLY be inspection and analysis.
+
+Inspect the current implementation and produce:
+
+1. Current project structure
+2. Current authentication architecture
+3. Current database/entity architecture
+4. Current service/query patterns
+5. Current frontend architecture
+6. Current test structure
+7. Current documentation
+8. Potential inefficient DB/query patterns
+9. Potential security issues
+10. Potential architectural issues
+11. What already correctly matches our specification
+12. What does not match
+13. Prioritized list of proposed changes
+
+Do not modify files.
+
+Do not run migrations.
+
+Do not seed.
+
+Do not install packages.
+
+Do not run e2e tests.
+
+Do not refactor anything.
+
+After the inspection, STOP and wait for my approval before making the first change.
+
+The purpose is to establish a transparent checkpoint-based development process where I can review every meaningful modification before it happens.
+
+
+
+
+
+
+
+
+
+PHASE 1.5 STATUS
+================
+
+[ ] Inspection completed
+[ ] Authentication audited
+[ ] Database audited
+[ ] Query efficiency audited
+[ ] Unit tests reviewed
+[ ] Document versioning validated
+[ ] Application snapshots validated
+[ ] User isolation validated
+[ ] Dependency behaviour validated
+[ ] Deadline behaviour validated
+
+GROUP 1
+=======
+
+[ ] Core unit tests
+[ ] Document N+1 fixed
+[ ] Opportunity lookup optimized
+[ ] Deadline validation optimized
+[ ] Independent queries reviewed
+[ ] Document transaction fixed
+[ ] Duplicate email handling fixed
+
+GROUP 2 — DESIGN ONLY
+=====================
+
+[ ] OTP/email verification design
+[ ] Password reset design
+[ ] Future ingestion architecture
+[ ] Future AI architecture
+[ ] Future frontend architecture
+
+DO NOT IMPLEMENT
+================
+
+[ ] Gmail
+[ ] Outlook
+[ ] AI
+[ ] Agentic execution
+[ ] Intelligent reminders
+[ ] RAG
+[ ] Vector DB
+[ ] Microservices
+
+
+==================================================
+TRACK 1 STATUS (appended — see docs/validation.md,
+"Track 1 — Identity & Authentication Foundation"
+and docs/decisions.md, "Track 1 decisions" for the
+full record; original checklist above left as-is)
+==================================================
+
+Group A (identity/auth/user foundation) — CLOSED, not carried into Track 2:
+
+[x] Authentication audited (Group A inspection report)
+[x] Refresh-token race fixed (atomic consume + per-user advisory lock)
+[x] Email normalization fixed
+[x] UsersController/UsersService layering fixed
+[x] Email/OTP verification — IMPLEMENTED (superseded "GROUP 2 — DESIGN ONLY"
+    above: this went beyond design into a full implementation, per explicit
+    instruction)
+[x] Password reset — IMPLEMENTED (same supersession as above)
+[x] Login/OTP/resend/reset rate limiting implemented (@nestjs/throttler)
+[x] Password policy hardened (bcrypt 72-byte limit)
+[x] ProfileService test-coverage gap closed
+[x] Migration created, run, and verified against Neon DEVELOP
+
+Explicitly out of scope (stated, not silently deferred):
+[ ] Gating other API routes on User.isVerified — cross-cutting product
+    decision, not identity/auth-foundation
+
+==================================================
+TRACK 1 HARDENING PASS (appended — see
+docs/validation.md, "Track 1 hardening pass" and
+docs/decisions.md for the full record)
+==================================================
+
+[x] CRITICAL BUG FOUND AND FIXED: refresh-token reuse-detection writes were
+    being silently rolled back by TypeORM whenever the transaction callback
+    threw after writing them — reuse detection reported success while
+    persisting nothing. Fixed: the transaction callback never throws now;
+    the exception is thrown after commit. Two regression tests assert
+    persisted DB state directly.
+[x] Advisory lock verified against real Neon DEVELOP Postgres (not just
+    documented): same-key serialization, different-key independence,
+    release-on-ROLLBACK all directly demonstrated.
+[x] Rate limiting: wiring verified via real Reflector/Module metadata
+    (route limits + global guard registration) — not booted, not E2E.
+[x] Email delivery: COMPLETE. SMTP via nodemailer (real provider, any
+    SMTP-speaking service), dev-log fallback, fail-fast config validation,
+    templates, asymmetric failure handling. No longer "boundary ready for
+    one" — the provider integration itself is implemented and tested with
+    fakes. Only real SMTP credentials remain infrastructure-dependent.
+[x] Password policy: Unicode/multibyte test coverage added.
+[x] User isolation: re-audited, zero id-based lookup surface confirmed.
+
+Genuinely infrastructure-dependent (not implementation work), left as-is:
+[ ] Real SMTP credentials for actual outbound delivery
+[ ] Gating other API routes on User.isVerified (product decision, Track 2+)
+[ ] Payments
+
+==================================================
+TRACK 1 → GROUP B: ACADEMIC & OPPORTUNITY DISCOVERY
+(appended — see docs/validation.md, "Group B" and
+docs/decisions.md, "Track 1 → Group B" for the full
+record)
+==================================================
+
+Scope amendment applied during this group: RBAC/admin foundation was
+originally classified V2, then pulled INTO Group B — shared catalog
+administration depends on it for correct/safe implementation, so the
+dependency was implemented now rather than artificially deferred.
+
+[x] RBAC dependency implemented because shared catalog administration
+    depends on it — minimal USER/ADMIN foundation (User.role, RolesGuard,
+    @Roles() decorator), not a full permissions system.
+[x] University/Programme/Opportunity mutation (create/update/delete) is now
+    ADMIN-only; reads remain open to any authenticated user. Catalog
+    consumption != catalog administration.
+[x] OpportunitySource inspected specifically, deliberately NOT admin-gated
+    — reasoning recorded in decisions.md, not assumed.
+[x] F1 — Opportunity relationship validation (previously zero: the only
+    Group B service that validated nothing on create/update)
+[x] F2 — University<->Programme cross-consistency check (a programmeId
+    could previously belong to a different university than the opportunity
+    claimed, undetected at any layer)
+[x] F3 — OpportunitySource.update() validates a changed opportunityId
+[x] F4 — required string fields (name/title/label/description) now reject
+    empty AND whitespace-only input
+[x] I2 — funding amount can no longer be negative
+[x] F5 — DB CHECK constraints for Requirement/Deadline's "at least one
+    parent" invariant — migrated and verified against Neon DEVELOP,
+    including a live rejected-insert proof
+[x] F7 — Opportunity.findAll() no longer eager-loads sources/requirements/
+    deadlines unconditionally
+[x] I1 — Deadline's independent link checks now run concurrently
+[x] Test coverage: Universities/Programmes/OpportunitySources/Requirements
+    went from 0 tests each to full coverage; Opportunities/Deadlines
+    substantially extended
+
+Deferred, with reasons (not silently dropped):
+[ ] University/Programme duplicate-warning UX — needs product/UX design for
+    the confirmation workflow first
+[ ] Opportunity intelligent duplicate detection — future ingestion/AI
+    capability, no reliable natural key exists yet for anything stronger
+[ ] Pagination on catalog list endpoints — V2 unless usage data shows a
+    real V1 need
+[ ] Fine-grained RBAC expansion (permission matrices, resource ACLs, admin
+    tiers, role-management API) — only the minimal USER/ADMIN distinction
+    needed for Group B was built; more sophisticated models remain future
+    work if a genuine need appears
+
+==================================================
+TRACK 1 → GROUP C: APPLICATION JOURNEY & WORKFLOW
+(appended — see docs/validation.md, "Track 1 -> Group C"
+and docs/decisions.md, "Track 1 Group C" for the full
+record)
+==================================================
+
+Closes the read-only domain audit's I3/I5/I6 findings plus the approved
+C1-C3 implementation scope.
+
+[x] C1.1 — Task.journeyId is now a required (NOT NULL) column, backing an
+    invariant every code path already assumed. Zero existing NULL rows
+    confirmed on Neon DEVELOP before migrating; NOT NULL presence and a
+    live rejected-insert both confirmed after.
+[x] C1.3 / I5 — Application.journeyId is immutable after creation. An
+    attempted change returns 400; an unchanged resend is a no-op. No
+    cascade-update, no transaction, no "move Application" feature was
+    built — none were asked for.
+[x] C2.1-C2.4 / I3 — Task dependsOnTaskId scope validation: no self-
+    dependency; an Application-scoped task may only depend on a task in
+    the same Application; a journey-level task may only depend on another
+    journey-level task in the same Journey (never an Application-scoped
+    one, even under the same Journey). Dependency target ownership
+    enforced via the same lookup used everywhere else. dependencyType can
+    never be set without a resulting dependsOnTaskId.
+[x] C2.5 — Task update() cross-consistency validated using each field's
+    effective (not just DTO-present) post-write value, same pattern as
+    Group B's Opportunity F2 fix.
+[x] C3 / I6 — Opportunity -> Application Requirement one-time copy, with
+    copiedFromRequirementId provenance (self-FK, ON DELETE SET NULL,
+    deliberately not indexed). Atomic with Application creation in one
+    short transaction; the Opportunity's requirements are read before the
+    transaction opens to keep its scope minimal. NEVER live
+    synchronization — later Opportunity edits/deletions never alter an
+    already-copied Requirement, and the copy is not re-triggered by a
+    later opportunityId change on update().
+[x] Migration 1788967836773-GroupCTaskJourneyRequiredAndRequirementProvenance
+    generated, run, and verified against Neon DEVELOP.
+[x] Full new test coverage: TasksService +19 tests, ApplicationsService
+    +12 tests — see docs/validation.md for the exact scenario list.
+[x] Confirmed VALID BY DESIGN, no change needed: ApplicationSnapshotsService
+    already reads Requirements generically by applicationId, so copied
+    Requirements flow into snapshots correctly with zero code change.
+
+Deferred, with reasons (not silently dropped):
+[ ] Task status-transition/workflow-state rules beyond the existing
+    informational-dependency model — not asked for this checkpoint
+[ ] Live synchronization of copied Requirements with their Opportunity
+    source — explicitly REJECTED, not merely deferred: conflicts with the
+    historical-integrity guarantee established for
+    ApplicationSnapshot/ApplicationDocument
+[ ] An Application "move to a different Journey" feature
+[ ] Re-triggering the Requirement copy when opportunityId changes on an
+    existing Application via update()
+
+Do not begin Group D, Track 2, UI/UX, ingestion, or AI work as a
+continuation of this checkpoint.
+
+==================================================
+TRACK 1 → GROUP D: DOCUMENTS & HISTORICAL RECORDS
+(appended — see docs/validation.md, "Track 1 -> Group D"
+and docs/decisions.md, "Track 1 Group D" for the full
+record)
+==================================================
+
+Read-only inspection found 1 CRITICAL + 6 IMPORTANT issues (plus several
+IMPROVEMENTs and deferred/V2 items). This implementation checkpoint closed
+all of them.
+
+[x] CRITICAL FIX — Cloudinary deletion ordering. DocumentsService.remove()
+    used to delete the Cloudinary asset BEFORE the Postgres row, which
+    ON DELETE RESTRICT on application_documents.document_id made
+    deterministically unsafe for any attached document: the real file was
+    destroyed, the DB delete then failed, and the caller only ever saw a
+    generic 500. Reordered: ownership check -> three concurrent eligibility
+    checks (attached / snapshot-referenced / has a dependent child), each a
+    clean 409 -> DB delete (+ current-version promotion, same transaction)
+    -> only then, Cloudinary delete. A Cloudinary failure after a successful
+    DB delete is logged for operational follow-up and never reverses the
+    already-committed DB deletion.
+[x] D1 — concurrent uploadNewVersion() race fixed: the version-determining
+    read now happens inside the transaction against a row locked with
+    SELECT ... FOR UPDATE, with isCurrent re-checked post-lock. The loser of
+    a race gets a clean 409, never a silently-created duplicate-numbered
+    sibling.
+[x] D-P2 — version-chain integrity: Document.previousVersionId's FK changed
+    from ON DELETE SET NULL to ON DELETE RESTRICT — a version a newer
+    version depends on can no longer be deleted, at either the DB or
+    service layer.
+[x] D-P1 / D4 — snapshot-reference deletion protection: a targeted,
+    user-scoped PostgreSQL JSONB containment query blocks deleting a
+    Document version that any existing Snapshot still references, even if
+    it is no longer currently attached (jsonb has no real FK, so this is
+    the only protection available).
+[x] D-P3 — current-version deletion promotes the previous version in the
+    same transaction; deleting the sole version of a family removes it
+    entirely with no misleading empty-current state.
+[x] D-P4 — ApplicationDocument detach implemented:
+    DELETE /applications/:id/documents/:documentId — removes only the join
+    row, never the Document, Cloudinary asset, or any existing Snapshot.
+[x] D-P5 — Application deletion policy (hard delete + full cascade,
+    including Snapshots) unchanged, now explicitly documented as an
+    intentional, irreversible, ownership-scoped action — the previously
+    dangling "Application Snapshot creation model" doc reference is fixed.
+[x] D-P6 — Group C requirement provenance now captured in snapshots
+    (requirementId + copiedFromRequirementId), a plain point-in-time copy,
+    never a live resolution of the source row.
+[x] Migration 1788989842296-GroupDDocumentVersionChainIntegrity generated,
+    run, and verified against Neon DEVELOP, including a live
+    rejected-delete proof (fabricated two-version chain, attempted to
+    delete the ancestor, confirmed rejection, rolled back cleanly).
+[x] Full new test coverage: DocumentsService +22 tests, ApplicationDocuments
+    +6 tests, ApplicationSnapshots/historical-integrity +5 tests — see
+    docs/validation.md for the exact scenario list.
+
+Deferred, with reasons (not silently dropped):
+[ ] Application soft-delete/archive architecture — a distinct, larger
+    feature (deletedAt-style soft delete across every cascading child
+    entity); not demonstrated as a genuine need yet
+[ ] Signed/expiring Cloudinary URLs — V2, no confidentiality requirement
+    demonstrated yet
+[ ] A Cloudinary retry/outbox/job platform — the practical two-phase
+    ordering plus an operational log line is proportionate for this stage
+[ ] A document-family-id schema redesign — the existing previousVersionId
+    chain, now RESTRICT-protected, is sufficient for every rule this
+    checkpoint required
+[ ] A speculative index for the new JSONB containment query — current
+    snapshot volume doesn't justify one; revisit if usage data ever shows
+    otherwise
+
+Do not begin Group E, Track 2, UI/UX, ingestion, or AI work as a
+continuation of this checkpoint.
