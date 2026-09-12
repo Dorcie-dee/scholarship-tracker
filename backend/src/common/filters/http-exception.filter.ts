@@ -7,15 +7,22 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { getRequestId } from '../logging/request-context';
 
 /**
  * Normalizes every error response (both thrown HttpExceptions and unexpected
  * errors) to a single shape so the frontend can rely on consistent parsing:
  *
- *   { statusCode, message, error, path, timestamp }
+ *   { statusCode, message, error, path, timestamp, requestId }
  *
  * Unexpected (non-HttpException) errors are logged with full detail server-side
  * but never leak internals (stack traces, driver errors, etc.) to the client.
+ *
+ * `requestId` (Production hardening, Batch 10) — the same correlation id
+ * this request's log lines carry (see request-context.ts) is now returned
+ * to the client too, so a user/support report ("it failed, here's what the
+ * app showed me") can be matched directly to server-side logs without
+ * needing a timestamp-based guess.
  */
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -52,6 +59,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       error,
       path: request.url,
       timestamp: new Date().toISOString(),
+      requestId: getRequestId() ?? null,
     });
   }
 }

@@ -8,6 +8,21 @@ import { SmtpEmailProvider } from './providers/smtp-email.provider';
 import { renderPasswordResetEmail, renderVerificationEmail } from './templates';
 
 /**
+ * Production hardening (Batch 11) — nodemailer's own defaults for these are
+ * unbounded-ish (its SMTP transport waits up to 2 minutes per phase by
+ * default). Several callers of `EmailService` `await` a send directly in
+ * the HTTP request path (`POST /auth/register`, `/auth/resend-verification`,
+ * `/auth/forgot-password` — the last one a @Public() route) — an
+ * unresponsive SMTP server could otherwise hold one of those requests open
+ * for minutes. Bounded here to something sane for an interactive request: a
+ * real SMTP provider (SES, SendGrid, Postmark, Mailgun, a corporate relay)
+ * connects and accepts a small transactional message well within this.
+ */
+const SMTP_CONNECTION_TIMEOUT_MS = 10_000;
+const SMTP_GREETING_TIMEOUT_MS = 10_000;
+const SMTP_SOCKET_TIMEOUT_MS = 15_000;
+
+/**
  * The one boundary between auth (OTP/password-reset) and actual email
  * delivery — see docs/decisions.md, "Email delivery: SMTP, not a vendor SDK".
  * Nothing outside this file (AuthService, EmailVerificationService,
@@ -65,6 +80,11 @@ export class EmailService {
         auth: email.smtpUser
           ? { user: email.smtpUser, pass: email.smtpPassword }
           : undefined,
+        // Production hardening (Batch 11) — see this file's doc comment on
+        // the constants above.
+        connectionTimeout: SMTP_CONNECTION_TIMEOUT_MS,
+        greetingTimeout: SMTP_GREETING_TIMEOUT_MS,
+        socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
       });
       const from = `"${email.fromName}" <${email.fromAddress}>`;
       this.logger.log(
