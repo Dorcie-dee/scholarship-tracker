@@ -13,12 +13,10 @@ export interface AuthenticatedUser {
    */
   isVerified: boolean;
   /**
-   * Same staleness class as `isVerified` above — a role change takes up to
-   * the access token's lifetime (15m default) to reflect in an
-   * already-issued token. No role-management endpoint exists in this V1
-   * foundation (role changes happen via direct DB access — see
-   * docs/decisions.md), so this window is not yet exercised in practice;
-   * documented now so it's not a surprise if/when one is added.
+   * Same claim shape as other JWT fields — may lag a DB role change until the
+   * access token expires. Routes protected by `@Roles()` re-check the live
+   * role via RolesGuard + UsersService.getRoleById(), so admin demotion takes
+   * effect immediately on those routes regardless of this claim.
    */
   role: UserRole;
 }

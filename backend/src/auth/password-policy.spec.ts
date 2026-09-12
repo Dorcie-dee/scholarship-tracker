@@ -81,7 +81,7 @@ describe('password-policy — bcrypt byte-limit', () => {
       register.password = 'a reasonably strong passphrase';
 
       const reset = new ResetPasswordDto();
-      reset.token = 'some-token';
+      reset.token = 'a'.repeat(64); // a real reset token is 64 hex chars
       reset.newPassword = 'a reasonably strong passphrase';
 
       expect(await validate(register)).toHaveLength(0);

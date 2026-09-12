@@ -35,6 +35,7 @@ describe('AuthService', () => {
   let profileService: any;
   let emailVerificationService: any;
   let emailService: any;
+  let loginGuardService: any;
   let refreshSessions: any;
   let service: AuthService;
 
@@ -53,6 +54,11 @@ describe('AuthService', () => {
       })),
     };
     emailService = { sendVerificationOtpEmail: jest.fn(async () => undefined) };
+    loginGuardService = {
+      assertNotLocked: jest.fn(async () => undefined),
+      recordFailure: jest.fn(async () => undefined),
+      recordSuccess: jest.fn(async () => undefined),
+    };
 
     // In-memory "table" so tests can exercise real rotation/reuse logic
     // instead of re-asserting whatever the mock was told to return.
@@ -146,6 +152,7 @@ describe('AuthService', () => {
       profileService,
       emailVerificationService,
       emailService,
+      loginGuardService,
       jwtService,
       configService,
       refreshSessions,
@@ -191,6 +198,22 @@ describe('AuthService', () => {
       expect(jwtService.signAsync).toHaveBeenCalledWith(
         expect.objectContaining({ role: UserRole.USER }),
         expect.anything(),
+      );
+    });
+
+    /** Production hardening (Batch 10) — matches JwtStrategy's pinned verification algorithm. */
+    it('signs the access token with an explicitly pinned algorithm (HS256)', async () => {
+      const created = makeUser();
+      usersService.createUser.mockResolvedValue(created);
+
+      await service.register(
+        { email: created.email, password: 'plaintext-password' },
+        {},
+      );
+
+      expect(jwtService.signAsync).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ algorithm: 'HS256' }),
       );
     });
 
@@ -257,6 +280,54 @@ describe('AuthService', () => {
           'correct-password',
         ),
       ).resolves.toBe(user);
+    });
+  });
+
+  /**
+   * Production hardening (Batch 2) — login() wraps credential validation
+   * with the account-scoped brute-force throttle. LoginGuardService itself
+   * is mocked here (its own real behavior is covered by
+   * login-guard.service.spec.ts) — this suite proves AuthService.login()
+   * calls it correctly and in the right order.
+   */
+  describe('login — account-scoped brute-force integration', () => {
+    it('checks the lockout BEFORE attempting credential validation', async () => {
+      loginGuardService.assertNotLocked.mockRejectedValueOnce(
+        new Error('locked out'),
+      );
+
+      await expect(
+        service.login('person@example.invalid', 'irrelevant', {}),
+      ).rejects.toThrow('locked out');
+
+      expect(usersService.findByEmail).not.toHaveBeenCalled();
+    });
+
+    it('records a failure on wrong credentials, and does not record a success', async () => {
+      usersService.findByEmail.mockResolvedValue(null);
+
+      await expect(
+        service.login('person@example.invalid', 'wrong', {}),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(loginGuardService.recordFailure).toHaveBeenCalledWith(
+        'person@example.invalid',
+      );
+      expect(loginGuardService.recordSuccess).not.toHaveBeenCalled();
+    });
+
+    it('records a success on correct credentials, and does not record a failure', async () => {
+      const hash = await bcrypt.hash('correct-password', 4);
+      usersService.findByEmail.mockResolvedValue(
+        makeUser({ passwordHash: hash }),
+      );
+
+      await service.login('person@example.invalid', 'correct-password', {});
+
+      expect(loginGuardService.recordSuccess).toHaveBeenCalledWith(
+        'person@example.invalid',
+      );
+      expect(loginGuardService.recordFailure).not.toHaveBeenCalled();
     });
   });
 
