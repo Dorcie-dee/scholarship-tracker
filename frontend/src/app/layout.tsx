@@ -1,30 +1,47 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
-import { Providers } from "./providers";
+import type { Metadata } from 'next';
+import { Plus_Jakarta_Sans, Syne, JetBrains_Mono } from 'next/font/google';
+import './globals.css';
+import { Providers } from './providers';
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+const sans = Plus_Jakarta_Sans({
+  variable: '--font-sans-loaded',
+  subsets: ['latin'],
+  display: 'swap',
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const display = Syne({
+  variable: '--font-display-loaded',
+  subsets: ['latin'],
+  display: 'swap',
+});
+
+const mono = JetBrains_Mono({
+  variable: '--font-mono-loaded',
+  subsets: ['latin'],
+  display: 'swap',
 });
 
 export const metadata: Metadata = {
-  title: "Scholarship OS",
-  description: "Track scholarship and admission applications end to end.",
+  title: {
+    default: 'Scholarship OS',
+    template: '%s · Scholarship OS',
+  },
+  description:
+    'Plan journeys, track applications, and never miss a scholarship deadline — the operating system for ambitious applicants.',
+  openGraph: {
+    title: 'Scholarship OS',
+    description: 'The operating system for scholarship and admission applications.',
+    type: 'website',
+  },
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: LayoutProps<'/'>) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${sans.variable} ${display.variable} ${mono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full flex flex-col font-sans">
         <Providers>{children}</Providers>
       </body>
     </html>
