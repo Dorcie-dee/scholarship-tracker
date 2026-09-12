@@ -2,7 +2,7 @@
 
 import type { AuthTokenResponse, SafeUser } from '@/lib/shared-types';
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { apiPost, setAccessToken, setUnauthorizedHandler } from './api-client';
+import { apiGet, apiPost, setAccessToken, setUnauthorizedHandler } from './api-client';
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
 
@@ -12,6 +12,8 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name?: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Re-fetches the current user (e.g. after verify-email or a name change) without a full page reload. */
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -77,8 +79,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [clearSession]);
 
+  const refreshUser = useCallback(async () => {
+    const fresh = await apiGet<SafeUser>('/users/me');
+    setUser(fresh);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, status, login, register, logout }}>
+    <AuthContext.Provider value={{ user, status, login, register, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

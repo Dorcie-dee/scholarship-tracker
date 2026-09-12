@@ -57,10 +57,9 @@ export enum RequirementType {
 }
 
 /**
- * Whether/how a Requirement has been satisfied. AI-driven states
- * (PROFILE_MATCH, AI_ASSESSMENT) are part of the vocabulary now so the schema
- * doesn't need to change later, but nothing in this phase writes them —
- * see docs/decisions.md ("No AI yet").
+ * Whether/how a Requirement has been satisfied. AI may *suggest*
+ * PROFILE_MATCH / AI_ASSESSMENT into pending suggestion fields; authoritative
+ * `status` changes only when the user confirms.
  */
 export enum RequirementStatus {
   UNKNOWN = 'unknown',
@@ -165,6 +164,30 @@ export enum SourceAuthorityLevel {
   UNVERIFIED = 'unverified',
 }
 
+/** Whether source name/excerpt were typed by the user or filled by URL fetch. */
+export enum ContentOrigin {
+  MANUAL = 'manual',
+  FETCHED = 'fetched',
+}
+
+/** Where a pending AI requirement suggestion came from. */
+export enum RequirementSuggestionSource {
+  HEURISTIC = 'heuristic',
+  EXTERNAL = 'external',
+}
+
+/** How an ApplicationSnapshot came to exist — always MANUAL today. */
+export enum SnapshotCreatedVia {
+  MANUAL = 'manual',
+  SUGGESTED = 'suggested',
+}
+
+/** Minimal V1 RBAC — see docs/decisions.md, "RBAC: a minimal foundation". */
+export enum UserRole {
+  USER = 'user',
+  ADMIN = 'admin',
+}
+
 /**
  * Shared shapes for auth API responses. Kept intentionally small — these mirror
  * what the auth module actually returns, not a general auth SDK.
@@ -175,6 +198,8 @@ export interface SafeUser {
   id: string;
   email: string;
   name: string | null;
+  isVerified: boolean;
+  role: UserRole;
   createdAt: string;
 }
 
