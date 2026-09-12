@@ -12,14 +12,63 @@ describe('OpportunitiesService', () => {
   let opportunities: any;
   let universitiesService: any;
   let programmesService: any;
+  let configService: any;
   let service: OpportunitiesService;
+  let rows: any[];
+
+  const makeQueryBuilder = () => {
+    const filters: Record<string, unknown> = {};
+    let limit = Infinity;
+    const qb: any = {
+      andWhere: jest.fn((_sql: string, params: any) => {
+        Object.assign(filters, params);
+        return qb;
+      }),
+      orderBy: jest.fn(() => qb),
+      addOrderBy: jest.fn(() => qb),
+      take: jest.fn((n: number) => {
+        limit = n;
+        return qb;
+      }),
+      getMany: jest.fn(async () => {
+        let result = [...rows];
+        if (filters.universityId) {
+          result = result.filter(
+            (r) => r.universityId === filters.universityId,
+          );
+        }
+        if (filters.studyLevel) {
+          result = result.filter((r) => r.studyLevel === filters.studyLevel);
+        }
+        result.sort(
+          (a, b) =>
+            b.createdAt.getTime() - a.createdAt.getTime() ||
+            b.id.localeCompare(a.id),
+        );
+        if (filters.cursorSortValue !== undefined) {
+          const cursorTime = new Date(
+            filters.cursorSortValue as string,
+          ).getTime();
+          result = result.filter(
+            (r) =>
+              r.createdAt.getTime() < cursorTime ||
+              (r.createdAt.getTime() === cursorTime &&
+                r.id < (filters.cursorId as string)),
+          );
+        }
+        return result.slice(0, limit);
+      }),
+    };
+    return qb;
+  };
 
   beforeEach(() => {
+    rows = [];
     opportunities = {
       create: jest.fn((partial: any) => ({ ...partial })),
       save: jest.fn(async (row: any) => ({ id: 'opportunity-1', ...row })),
-      find: jest.fn(async () => []),
       findOne: jest.fn(async () => ({ id: 'opportunity-1', title: 'Sample' })),
+      createQueryBuilder: jest.fn(() => makeQueryBuilder()),
     };
     universitiesService = {
       findOneOrThrow: jest.fn(async (id: string) => ({ id })),
@@ -30,10 +79,14 @@ describe('OpportunitiesService', () => {
         universityId: 'university-1',
       })),
     };
+    configService = {
+      get: jest.fn(() => ({ defaultPageSize: 25, maxPageSize: 100 })),
+    };
     service = new OpportunitiesService(
       opportunities,
       universitiesService,
       programmesService,
+      configService,
     );
   });
 
@@ -80,28 +133,60 @@ describe('OpportunitiesService', () => {
     });
   });
 
-  /** F7: findAll() previously eager-loaded sources/requirements/deadlines unconditionally. */
-  describe('findAll — F7 fix', () => {
-    it('does not request sources/requirements/deadlines relations', async () => {
-      await service.findAll({});
+  /**
+   * F7: findAll() previously eager-loaded sources/requirements/deadlines
+   * unconditionally. Production hardening (Batch 4): also now
+   * keyset-paginated — see universities.service.spec.ts's doc comment for
+   * the fake createQueryBuilder() approach.
+   */
+  describe('findAll — F7 fix + pagination (Batch 4)', () => {
+    beforeEach(() => {
+      rows = [
+        {
+          id: 'opp-1',
+          title: 'Older',
+          universityId: 'university-1',
+          createdAt: new Date('2026-01-01T00:00:00Z'),
+        },
+        {
+          id: 'opp-2',
+          title: 'Newer',
+          universityId: 'university-2',
+          createdAt: new Date('2026-02-01T00:00:00Z'),
+        },
+      ];
+    });
 
-      expect(opportunities.find).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: {},
-          order: { createdAt: 'DESC' },
-        }),
+    it('never requests sources/requirements/deadlines relations (only createQueryBuilder is ever used, no relations/leftJoinAndSelect calls)', async () => {
+      await service.findAll({});
+      // createQueryBuilder-based reads never carry a `relations` option at
+      // all — there is no eager-load path left to accidentally trigger.
+      expect(opportunities.createQueryBuilder).toHaveBeenCalledWith(
+        'opportunity',
       );
-      const [callArgs] = opportunities.find.mock.calls[0];
-      expect(callArgs).not.toHaveProperty('relations');
+    });
+
+    it('orders newest-first by default, matching the original order', async () => {
+      const result = await service.findAll({});
+      expect(result.items.map((r: any) => r.id)).toEqual(['opp-2', 'opp-1']);
     });
 
     it('applies filters when given', async () => {
-      await service.findAll({ universityId: 'university-1' });
-      expect(opportunities.find).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { universityId: 'university-1' },
-        }),
-      );
+      const result = await service.findAll({ universityId: 'university-1' });
+      expect(result.items.map((r: any) => r.id)).toEqual(['opp-1']);
+    });
+
+    it('paginates with a working cursor', async () => {
+      const first = await service.findAll({ limit: 1 });
+      expect(first.items.map((r: any) => r.id)).toEqual(['opp-2']);
+      expect(first.hasNextPage).toBe(true);
+
+      const second = await service.findAll({
+        limit: 1,
+        cursor: first.nextCursor!,
+      });
+      expect(second.items.map((r: any) => r.id)).toEqual(['opp-1']);
+      expect(second.hasNextPage).toBe(false);
     });
   });
 

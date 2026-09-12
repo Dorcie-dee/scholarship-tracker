@@ -6,6 +6,12 @@ import { RefreshSession } from '../../auth/entities/refresh-session.entity';
 import { ApplicantProfile } from '../../profile/entities/applicant-profile.entity';
 import { Document } from '../../documents/entities/document.entity';
 
+/**
+ * Admin directory keyset: newest-first `(createdAt, id)`.
+ * Role-filtered browse: `(role, createdAt, id)`.
+ */
+@Index('IDX_users_created_at_id', ['createdAt', 'id'])
+@Index('IDX_users_role_created_at_id', ['role', 'createdAt', 'id'])
 @Entity('users')
 export class User extends BaseEntity {
   @Index({ unique: true })

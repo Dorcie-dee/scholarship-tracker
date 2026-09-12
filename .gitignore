@@ -1,0 +1,5 @@
+# Local-only project journal and prompt/history files — not part of the
+# shipped repo content. Kept on disk, just untracked.
+phase-1o5.txt
+README.md
+Claude Terminal — Initial Scholarship OS Foundation Build Prompt.md

@@ -20,8 +20,19 @@ describe('UsersService — duplicate email handling', () => {
       create: jest.fn((partial: any) => ({ ...partial })),
       save: jest.fn(async (row: any) => ({ id: 'user-1', ...row })),
       createQueryBuilder: jest.fn(),
+      update: jest.fn(async () => undefined),
+      count: jest.fn(async () => 1),
     };
-    service = new UsersService(usersRepository);
+    const dataSource = {
+      transaction: jest.fn(async (fn: any) =>
+        fn({ getRepository: () => usersRepository }),
+      ),
+    };
+    service = new UsersService(
+      usersRepository,
+      dataSource as any,
+      { get: () => ({ defaultPageSize: 25, maxPageSize: 100 }) } as any,
+    );
   });
 
   const params = {
@@ -102,7 +113,11 @@ describe('UsersService — email normalization', () => {
       findOne: jest.fn(async () => null),
       createQueryBuilder: jest.fn(),
     };
-    service = new UsersService(usersRepository);
+    service = new UsersService(
+      usersRepository,
+      { transaction: jest.fn() } as any,
+      { get: () => ({ defaultPageSize: 25, maxPageSize: 100 }) } as any,
+    );
   });
 
   it('findByEmail queries with a normalized value regardless of input casing', async () => {
@@ -158,7 +173,11 @@ describe('UsersService — update/markVerified (A1.3)', () => {
       update: jest.fn(async () => ({ affected: 1 })),
       findOne: jest.fn(async () => ({ id: 'user-1', name: 'New name' })),
     };
-    service = new UsersService(usersRepository);
+    service = new UsersService(
+      usersRepository,
+      { transaction: jest.fn() } as any,
+      { get: () => ({ defaultPageSize: 25, maxPageSize: 100 }) } as any,
+    );
   });
 
   it('update() issues one UPDATE then re-reads the user — same query shape as the controller had before A1.3', async () => {
@@ -223,7 +242,11 @@ describe('UsersService — createUser always assigns the least-privileged role',
       create: jest.fn((partial: any) => ({ ...partial })),
       save: jest.fn(async (row: any) => ({ id: 'user-1', ...row })),
     };
-    service = new UsersService(usersRepository);
+    service = new UsersService(
+      usersRepository,
+      { transaction: jest.fn() } as any,
+      { get: () => ({ defaultPageSize: 25, maxPageSize: 100 }) } as any,
+    );
   });
 
   it('createUser() sets role: USER explicitly, regardless of anything the caller attempts to pass', async () => {

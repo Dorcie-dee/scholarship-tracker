@@ -12,6 +12,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { trim } from '../../common/validators/trim.transform';
+import { FREE_TEXT_MAX_LENGTH } from '../../common/validators/text-limits';
 
 export class CreateOpportunityDto {
   @Transform(trim)
@@ -70,6 +71,7 @@ export class CreateOpportunityDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(FREE_TEXT_MAX_LENGTH)
   eligibilitySummary?: string;
 
   @IsOptional()
@@ -90,6 +92,14 @@ export class CreateOpportunityDto {
   @IsUUID()
   programmeId?: string;
 
+  /**
+   * Production hardening (Batch 8) — deliberately left without a shape/size
+   * bound beyond `@IsObject()` and the global request body limit (256kb,
+   * see bootstrap.ts). Unlike every other free-text field in this DTO
+   * (now `@MaxLength`-bounded — see text-limits.ts), metadata is unbounded
+   * here by design for this phase; revisit if abuse appears once create is
+   * open to all authenticated users.
+   */
   @IsOptional()
   @IsObject()
   metadata?: Record<string, unknown>;

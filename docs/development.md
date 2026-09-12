@@ -51,10 +51,19 @@ cd frontend && yarn dev         # http://localhost:3000
 
 ## Testing
 
+Seven distinct layers, added incrementally through the Production Hardening pass (see
+`decisions.md`) — each proves something the layers around it structurally cannot, and none replaces
+another:
+
 ```bash
 cd backend
-yarn test        # unit tests (Jest, mocked repositories — no database needed)
-yarn test:e2e    # e2e tests against a real Postgres — see below
+yarn test                   # unit tests (Jest, mocked repositories — no database needed)
+yarn test:db-integration    # real local Postgres: constraints, cascades, ORM behaviors
+yarn test:http-integration  # real HTTP requests through the real app + real local Postgres
+yarn test:concurrency       # real simultaneous requests against real Postgres — row locks, races
+yarn test:failure-recovery  # real unreachable Postgres/Redis/SMTP — outage/degradation behavior
+yarn load-test               # autocannon against the real app — latency/throughput, not pass/fail
+yarn test:e2e                 # legacy session-lifecycle suite — now safe to run, see below
 yarn lint
 
 cd frontend
@@ -62,23 +71,42 @@ yarn lint
 yarn build       # also type-checks and prerenders static routes
 ```
 
-### e2e tests use a separate database
+### `test:db-integration` / `test:http-integration` / `test:concurrency` / `test:failure-recovery` / `load-test` / `test:e2e`
 
-`backend/test/jest-e2e.json` loads `backend/test/setup-env.ts` (via `setupFiles`), which sets
-`POSTGRES_DB=scholarship_os_test` directly on `process.env` before the app boots — e2e tests never
-touch your dev data, with no third env file needed (backend has deliberately only `.env` and
-`sample.env` — see `decisions.md`). That database needs to exist on whichever Postgres server your
-`.env` points at. For local Postgres, create and migrate it once:
+All six are **hardcoded to a local Postgres database named `scholarship_os_test`** — `localhost:5432`,
+role `scholarship_os` — deliberately never derived from `.env` (see
+`test/db-integration/test-data-source.ts` and `test/http-integration/setup-env.ts`'s own doc comments
+for why; `test/setup-env.ts`, loaded by `test:e2e`, was fixed to the same hardcoded pattern during the
+final verification pass — see `decisions.md`, "Final verification pass"). Create and migrate that
+database once:
 
 ```bash
 psql postgres -c "CREATE DATABASE scholarship_os_test OWNER scholarship_os;"
 cd backend
-POSTGRES_DB=scholarship_os_test yarn migration:run
+POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_USER=scholarship_os \
+  POSTGRES_PASSWORD=scholarship_os_dev_password POSTGRES_DB=scholarship_os_test \
+  POSTGRES_SSL=false yarn migration:run
 ```
 
-(Setting `POSTGRES_DB` on the shell overrides `.env`'s value — `dotenv` never clobbers an
-already-set environment variable.) If `.env` points at a managed provider instead, create the
-`scholarship_os_test` database there first (e.g. a second Neon branch/database).
+then all six commands need no further setup, regardless of what `.env` points at. They coexist safely
+with `yarn test` (which touches no database at all) and with each other (`test:db-integration` uses one
+rolled-back transaction per test; the others clean up exactly the rows they create, by a
+unique-per-run prefix — never a blanket `TRUNCATE`). `test:e2e`'s two suites
+(`app.e2e-spec.ts`/`auth.e2e-spec.ts`) reuse the same `bootstrapTestApp()` helper the HTTP integration
+layer uses, and overlap substantially with `test/http-integration/auth-flow.http-integration-spec.ts`
+— kept as a separate, optional layer rather than deleted (the original, more granular
+session-lifecycle assertions — reuse-detection message content, a fresh-login-after-revocation cycle
+— have their own value, and running it costs nothing once its connection target is safe).
+
+For **any** of these five newer layers or a fixed e2e layer, create and migrate the database once:
+
+```bash
+psql postgres -c "CREATE DATABASE scholarship_os_test OWNER scholarship_os;"
+cd backend
+POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_USER=scholarship_os \
+  POSTGRES_PASSWORD=scholarship_os_dev_password POSTGRES_DB=scholarship_os_test \
+  POSTGRES_SSL=false yarn migration:run
+```
 
 ## Migrations
 

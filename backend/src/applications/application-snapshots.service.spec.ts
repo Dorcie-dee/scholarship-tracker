@@ -71,6 +71,13 @@ describe('ApplicationSnapshotsService', () => {
       requirements,
       applicationsService,
       profileService,
+      {
+        transaction: jest.fn(async (fn: any) =>
+          fn({
+            getRepository: () => applicationSnapshots,
+          }),
+        ),
+      } as any,
     );
   });
 
@@ -340,10 +347,106 @@ describe('ApplicationSnapshotsService', () => {
     });
   });
 
-  describe('immutability — no mutation path exists', () => {
-    it('has no update or remove method', () => {
+  describe('append-only edit / explicit delete', () => {
+    it('has no in-place update method — edits go through edit()', () => {
       expect((service as any).update).toBeUndefined();
-      expect((service as any).remove).toBeUndefined();
+      expect(typeof (service as any).edit).toBe('function');
+      expect(typeof (service as any).remove).toBe('function');
+    });
+
+    it('edit() creates a new revision with supersedesSnapshotId set', async () => {
+      const previous = {
+        id: 'snapshot-old',
+        applicationId,
+        label: 'v1',
+        data: { application: { title: 'Old' } },
+        createdVia: SnapshotCreatedVia.MANUAL,
+      };
+      const repo = {
+        findOne: jest.fn(async () => previous),
+        create: jest.fn((partial: any) => ({ ...partial })),
+        save: jest.fn(async (row: any) => ({ id: 'snapshot-new', ...row })),
+        delete: jest.fn(),
+      };
+      service = new ApplicationSnapshotsService(
+        applicationSnapshots,
+        applicationDocuments,
+        requirements,
+        applicationsService,
+        profileService,
+        {
+          transaction: jest.fn(async (fn: any) =>
+            fn({ getRepository: () => repo }),
+          ),
+        } as any,
+      );
+
+      const revision = await service.edit(
+        userId,
+        applicationId,
+        'snapshot-old',
+        {
+          label: 'v2',
+          data: { application: { title: 'New' } },
+        },
+      );
+
+      expect(revision.supersedesSnapshotId).toBe('snapshot-old');
+      expect(revision.label).toBe('v2');
+      expect(repo.save).toHaveBeenCalled();
+      expect(repo.delete).not.toHaveBeenCalled();
+    });
+
+    it('remove() deletes after ownership + application scoping', async () => {
+      const repo = {
+        findOne: jest.fn(async () => ({
+          id: 'snapshot-1',
+          applicationId,
+        })),
+        delete: jest.fn(async () => ({ affected: 1 })),
+      };
+      service = new ApplicationSnapshotsService(
+        applicationSnapshots,
+        applicationDocuments,
+        requirements,
+        applicationsService,
+        profileService,
+        {
+          transaction: jest.fn(async (fn: any) =>
+            fn({ getRepository: () => repo }),
+          ),
+        } as any,
+      );
+
+      await service.remove(userId, applicationId, 'snapshot-1');
+      expect(repo.delete).toHaveBeenCalledWith({
+        id: 'snapshot-1',
+        applicationId,
+      });
+    });
+
+    it('edit() 404s for a snapshot on another application', async () => {
+      const repo = {
+        findOne: jest.fn(async () => null),
+        create: jest.fn(),
+        save: jest.fn(),
+      };
+      service = new ApplicationSnapshotsService(
+        applicationSnapshots,
+        applicationDocuments,
+        requirements,
+        applicationsService,
+        profileService,
+        {
+          transaction: jest.fn(async (fn: any) =>
+            fn({ getRepository: () => repo }),
+          ),
+        } as any,
+      );
+
+      await expect(
+        service.edit(userId, applicationId, 'foreign-snap', { label: 'x' }),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });

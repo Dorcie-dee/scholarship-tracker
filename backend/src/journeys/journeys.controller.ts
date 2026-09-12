@@ -8,12 +8,14 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { JourneysService } from './journeys.service';
 import { CreateJourneyDto } from './dto/create-journey.dto';
 import { UpdateJourneyDto } from './dto/update-journey.dto';
+import { PaginationQueryDto } from '../common/pagination/pagination-query.dto';
 
 @Controller('journeys')
 export class JourneysController {
@@ -28,8 +30,11 @@ export class JourneysController {
   }
 
   @Get()
-  findAll(@CurrentUser() user: AuthenticatedUser) {
-    return this.journeysService.findAllForUser(user.userId);
+  findAll(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.journeysService.findAllForUser(user.userId, query);
   }
 
   @Get(':id')

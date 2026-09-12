@@ -96,6 +96,25 @@ describe('EmailService', () => {
           ),
       ).not.toThrow();
     });
+
+    /**
+     * Production hardening (Batch 11) — the SMTP transporter must never
+     * inherit nodemailer's own effectively-unbounded default timeouts:
+     * several EmailService callers await a send directly in the HTTP
+     * request path (see email.service.ts's doc comment on the constants).
+     */
+    it('configures bounded connection/greeting/socket timeouts on the SMTP transporter', () => {
+      const service = new EmailService(
+        makeConfigService({
+          email: { ...baseConfig.email, smtpHost: 'smtp.example.invalid' },
+        }),
+      );
+
+      const transporterOptions = (service as any).provider.transporter.options;
+      expect(transporterOptions.connectionTimeout).toBeGreaterThan(0);
+      expect(transporterOptions.greetingTimeout).toBeGreaterThan(0);
+      expect(transporterOptions.socketTimeout).toBeGreaterThan(0);
+    });
   });
 
   describe('sendVerificationOtpEmail / sendPasswordResetEmail (dev transport)', () => {

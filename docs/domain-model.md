@@ -98,13 +98,20 @@ User ──< ApplicationJourney ──< Application ──< Requirement
   `requirementId` and the Group C `copiedFromRequirementId` provenance breadcrumb (a copied value,
   never a live resolution of the source row). See `decisions.md`, "Application Snapshot creation
   model" and "Snapshot requirement provenance".
-- **Application deletion is a hard delete** (Track 1 Group D, explicitly documented, not a bug):
-  cascades through `ApplicationDocument`/`Requirement`/`Task`/`Deadline`/`ApplicationSnapshot` —
-  including every Snapshot the Application ever had. No soft-delete/archive mechanism exists
-  anywhere in this codebase. This is irreversible and is a distinct thing from the mutation-immunity
-  guarantee above: a Snapshot never changes due to normal mutation, but IS intentionally destroyed
-  if its owning Application is explicitly deleted. See `decisions.md`, "Application deletion: hard
-  delete, explicitly documented".
+- **Application deletion is a soft delete** (`@DeleteDateColumn() deletedAt` — Production Hardening
+  Batch 7; this supersedes the original Track 1 Group D "hard delete" design documented in
+  `decisions.md`, "Application deletion: hard delete, explicitly documented" — see that entry's own
+  "Superseded by..." note). `DELETE /applications/:id` marks the row `deletedAt` and it immediately
+  stops appearing anywhere in the normal API surface — including, as of Track 2 §0, every Task
+  attached to it, not just the Application itself and its Requirements/Deadlines/Documents/Snapshots
+  (see `decisions.md`, "Track 2, §0"). The row (and its children) is only permanently removed,
+  cascading exactly as the old hard-delete did, once `applications.softDeleteRetentionDays` (default
+  30 days) elapses and the purge job runs. **Owner-only restore** is available via
+  `POST /applications/:id/restore` while the soft-deleted row still exists (before purge). ADMIN
+  cannot restore another user's application. This remains a deliberately narrow soft-delete
+  exception — every other entity in this codebase stays hard-delete. Snapshot rows still never
+  change due to normal application mutation; they are only destroyed on purge (or via the explicit
+  snapshot delete endpoint).
 - **ApplicantProfile**'s education/experience/skills/certifications/languages are jsonb arrays, not
   normalized child tables. See `decisions.md`, "Don't over-model the profile yet."
 
@@ -114,9 +121,9 @@ Status/type enums are defined twice — `backend/src/types.ts` (used by the Type
 definitions) and `frontend/src/lib/shared-types.ts` (used by the frontend's labels/filters) — kept
 manually in sync since `backend` and `frontend` are independent repos with no shared package (see
 `decisions.md`, "Independent repos over a shared types package"). Several enums
-(`RequirementStatus`'s `PROFILE_MATCH`/`AI_ASSESSMENT`, in particular) include values for
-not-yet-built AI features so the schema won't need a migration when that phase starts — nothing in
-this phase writes those values.
+(`RequirementStatus`'s `PROFILE_MATCH`/`AI_ASSESSMENT`, in particular) are used by the AI suggestion
+flow: a replaceable `RequirementAiProvider` may suggest those values into pending suggestion fields;
+authoritative `status` changes only on explicit user confirm.
 
 ## Auth-adjacent tables
 
@@ -125,8 +132,8 @@ this phase writes those values.
   `isVerified` (Track 1) — tracked and exposed, but does not currently gate API access; see
   `decisions.md`, "Email verification does not gate API access (yet)". And `role` (Track 1 Group B) —
   `UserRole.USER`/`UserRole.ADMIN`, defaults to `USER`, gates shared-catalog mutation only (see
-  `decisions.md`, "RBAC: a minimal foundation, not a permissions system") — no role-management API
-  endpoint exists; promotion is via direct database access only.
+  `decisions.md`, "RBAC: a minimal foundation, not a permissions system"). Role changes go through
+  dedicated `PATCH /users/:id/role` (ADMIN-only); `/users/me` never accepts `role`.
 - **RefreshSession** — one row per issued refresh credential (i.e. per logged-in device). See
   `architecture.md`'s auth flow and `decisions.md`'s "Refresh token storage" for why this exists
   instead of a single token column on User.

@@ -104,6 +104,11 @@ describe('ApplicationSnapshotsService — historical integrity', () => {
       requirements,
       applicationsService,
       profileService,
+      {
+        transaction: jest.fn(async (fn: any) =>
+          fn({ getRepository: () => applicationSnapshots }),
+        ),
+      } as any,
     );
   });
 

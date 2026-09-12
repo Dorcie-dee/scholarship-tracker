@@ -5,7 +5,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { In, Repository } from 'typeorm';
+import { AppConfig } from '../config/configuration';
+import {
+  applyKeysetPagination,
+  buildPaginatedResult,
+  decodeCursor,
+  PaginatedResult,
+  resolvePageSize,
+} from '../common/pagination/cursor';
+import { PaginationQueryDto } from '../common/pagination/pagination-query.dto';
 import { Document } from './entities/document.entity';
 import { ApplicationDocument } from '../applications/entities/application-document.entity';
 import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
@@ -36,7 +46,47 @@ export class DocumentsService {
     @InjectRepository(ApplicationDocument)
     private readonly applicationDocuments: Repository<ApplicationDocument>,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly configService: ConfigService<AppConfig, true>,
   ) {}
+
+  /**
+   * Production hardening (Batch 6) — compensating action for an
+   * upload-then-persist failure: the Cloudinary asset above was created
+   * successfully, but the DB write that was supposed to record it never
+   * committed, so it's an orphan (unreferenced by any Document row) unless
+   * something removes it.
+   *
+   * This is a best-effort, synchronous compensating delete rather than a
+   * transactional outbox / background-reconciliation worker — deliberately.
+   * An orphaned Cloudinary asset here has no correctness or security impact
+   * (it's never linked to from the DB, never returned to any user, never
+   * resolvable by publicId alone since `getSignedDeliveryUrl()` always
+   * signs from an owned DB row) — the only cost is storage. The failure
+   * window this needs to cover is narrow (the moment between a successful
+   * upload and the `save`/`transaction` call immediately after it in the
+   * same request), so an immediate compensating delete closes the loop for
+   * the overwhelming majority of cases without any new infrastructure. On
+   * the rare case where the compensating delete itself also fails (e.g.
+   * Cloudinary transiently unreachable at that exact moment), this logs
+   * clearly for manual follow-up — the same pattern already used for a
+   * failed delete-after-DB-success in `remove()`. See docs/decisions.md,
+   * "Cloudinary orphan handling: compensating delete, not an outbox".
+   */
+  private async compensateFailedUpload(
+    publicId: string,
+    resourceType: 'image' | 'raw' | 'video',
+  ): Promise<void> {
+    try {
+      await this.cloudinaryService.deleteByPublicId(publicId, resourceType);
+    } catch (cleanupError) {
+      this.logger.error(
+        `Cloudinary asset orphaned after a failed document save: publicId=${publicId}. ` +
+          `The upload succeeded but no Document row references it, and the compensating ` +
+          `delete also failed. Manual cleanup may be required. Underlying error: ` +
+          `${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+      );
+    }
+  }
 
   async uploadNew(
     ownerId: string,
@@ -57,11 +107,20 @@ export class DocumentsService {
       previousVersionId: null,
       cloudinaryPublicId: uploaded.publicId,
       cloudinaryUrl: uploaded.secureUrl,
+      cloudinaryResourceType: uploaded.resourceType,
       mimeType: file.mimetype,
       fileSizeBytes: file.size,
       isCurrent: true,
     });
-    return this.documents.save(document);
+    try {
+      return await this.documents.save(document);
+    } catch (error) {
+      await this.compensateFailedUpload(
+        uploaded.publicId,
+        uploaded.resourceType as 'image' | 'raw' | 'video',
+      );
+      throw error;
+    }
   }
 
   /**
@@ -107,49 +166,93 @@ export class DocumentsService {
       filename: file.originalname,
     });
 
-    return this.documents.manager.transaction(async (manager) => {
-      const locked = await manager
-        .createQueryBuilder(Document, 'document')
-        .setLock('pessimistic_write')
-        .where('document.id = :id', { id: documentId })
-        .getOne();
-      if (!locked) {
-        throw new NotFoundException('Document not found');
-      }
-      // Re-verified against the freshly-locked row, not the pre-lock read
-      // above — cheap, and correct defense-in-depth.
-      assertOwnership(locked.ownerId, ownerId);
+    try {
+      return await this.documents.manager.transaction(async (manager) => {
+        const locked = await manager
+          .createQueryBuilder(Document, 'document')
+          .setLock('pessimistic_write')
+          .where('document.id = :id', { id: documentId })
+          .getOne();
+        if (!locked) {
+          throw new NotFoundException('Document not found');
+        }
+        // Re-verified against the freshly-locked row, not the pre-lock read
+        // above — cheap, and correct defense-in-depth.
+        assertOwnership(locked.ownerId, ownerId);
 
-      if (!locked.isCurrent) {
-        throw new ConflictException(
-          'This document has already been superseded by a newer version — refresh and try again',
-        );
-      }
+        if (!locked.isCurrent) {
+          throw new ConflictException(
+            'This document has already been superseded by a newer version — refresh and try again',
+          );
+        }
 
-      await manager.update(Document, locked.id, { isCurrent: false });
-      const next = manager.create(Document, {
-        ownerId,
-        title: dto.title ?? locked.title,
-        documentType: dto.documentType ?? locked.documentType,
-        notes: dto.notes ?? locked.notes,
-        version: locked.version + 1,
-        previousVersionId: locked.id,
-        cloudinaryPublicId: uploaded.publicId,
-        cloudinaryUrl: uploaded.secureUrl,
-        mimeType: file.mimetype,
-        fileSizeBytes: file.size,
-        isCurrent: true,
+        await manager.update(Document, locked.id, { isCurrent: false });
+        const next = manager.create(Document, {
+          ownerId,
+          title: dto.title ?? locked.title,
+          documentType: dto.documentType ?? locked.documentType,
+          notes: dto.notes ?? locked.notes,
+          version: locked.version + 1,
+          previousVersionId: locked.id,
+          cloudinaryPublicId: uploaded.publicId,
+          cloudinaryUrl: uploaded.secureUrl,
+          cloudinaryResourceType: uploaded.resourceType,
+          mimeType: file.mimetype,
+          fileSizeBytes: file.size,
+          isCurrent: true,
+        });
+        return manager.save(next);
       });
-      return manager.save(next);
-    });
+    } catch (error) {
+      // Production hardening (Batch 6) — see compensateFailedUpload()'s doc
+      // comment. Covers both a raw DB failure and this method's own
+      // ConflictException/NotFoundException (the transaction rolled back
+      // either way, so the newly-uploaded asset is unreferenced regardless
+      // of which kind of error caused the rollback).
+      await this.compensateFailedUpload(
+        uploaded.publicId,
+        uploaded.resourceType as 'image' | 'raw' | 'video',
+      );
+      throw error;
+    }
   }
 
   /** Lists only the current version of each of the user's documents. */
-  findAllCurrentForUser(ownerId: string): Promise<Document[]> {
-    return this.documents.find({
-      where: { ownerId, isCurrent: true },
-      order: { createdAt: 'DESC' },
+  /** Production hardening (Batch 4) — keyset-paginated, ordered by `(createdAt, id)` DESC. */
+  async findAllCurrentForUser(
+    ownerId: string,
+    query: PaginationQueryDto,
+  ): Promise<PaginatedResult<Document>> {
+    const { defaultPageSize, maxPageSize } = this.configService.get(
+      'pagination',
+      { infer: true },
+    );
+    const limit = resolvePageSize(query.limit, {
+      defaultPageSize,
+      maxPageSize,
     });
+    const direction = query.order === 'asc' ? 'ASC' : 'DESC';
+
+    const qb = this.documents
+      .createQueryBuilder('document')
+      .andWhere('document.ownerId = :ownerId', { ownerId })
+      .andWhere('document.isCurrent = true');
+    applyKeysetPagination(
+      qb,
+      'document.createdAt',
+      'document.id',
+      direction,
+      query.cursor ? decodeCursor(query.cursor) : undefined,
+      limit,
+    );
+
+    const rows = await qb.getMany();
+    return buildPaginatedResult(
+      rows,
+      limit,
+      (r) => r.createdAt.toISOString(),
+      (r) => r.id,
+    );
   }
 
   /**
@@ -205,6 +308,50 @@ export class DocumentsService {
     const document = await this.findEntityOrThrow(id);
     assertOwnership(document.ownerId, ownerId);
     return document;
+  }
+
+  /**
+   * `cloudinaryResourceType` is nullable only for rows written before that
+   * column existed — for those, fall back to inferring from `mimeType`
+   * (image/* → 'image', everything else → 'raw', matching how Cloudinary's
+   * own `resource_type: 'auto'` detection already behaved for this app's
+   * document types — never 'video').
+   */
+  private resolveResourceType(
+    document: Pick<Document, 'cloudinaryResourceType' | 'mimeType'>,
+  ): 'image' | 'raw' | 'video' {
+    if (document.cloudinaryResourceType === 'image') return 'image';
+    if (document.cloudinaryResourceType === 'video') return 'video';
+    if (document.cloudinaryResourceType === 'raw') return 'raw';
+    return document.mimeType?.startsWith('image/') ? 'image' : 'raw';
+  }
+
+  /**
+   * Production hardening (Batch 6) — the only supported way to actually
+   * retrieve a document's file content now that uploads are Cloudinary
+   * `type: 'authenticated'` (see cloudinary.service.ts's doc comment):
+   * `document.cloudinaryUrl` alone is no longer retrievable directly.
+   * Ownership-checked exactly like every other Document read — a caller can
+   * never obtain a signed URL for a document they don't own, and the
+   * `publicId` itself is never client-supplied (it's read from the owned
+   * row, not accepted as a parameter).
+   */
+  async getSignedDownloadUrl(
+    id: string,
+    ownerId: string,
+  ): Promise<{ url: string; expiresInSeconds: number }> {
+    const document = await this.findOwnedOrThrow(id, ownerId);
+    const { signedUrlTtlSeconds } = this.configService.get('documents', {
+      infer: true,
+    });
+    const url = this.cloudinaryService.getSignedDeliveryUrl(
+      document.cloudinaryPublicId,
+      this.resolveResourceType(document),
+    );
+    // `expiresInSeconds` is the *intended* validity window communicated to
+    // the client — see CloudinaryService.getSignedDeliveryUrl()'s doc
+    // comment for why it isn't yet enforced by Cloudinary itself.
+    return { url, expiresInSeconds: signedUrlTtlSeconds };
   }
 
   async update(
@@ -340,6 +487,7 @@ export class DocumentsService {
     try {
       await this.cloudinaryService.deleteByPublicId(
         document.cloudinaryPublicId,
+        this.resolveResourceType(document),
       );
     } catch (error) {
       this.logger.error(

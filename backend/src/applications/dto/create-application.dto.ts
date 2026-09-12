@@ -8,6 +8,7 @@ import {
   IsUrl,
   MaxLength,
 } from 'class-validator';
+import { FREE_TEXT_MAX_LENGTH } from '../../common/validators/text-limits';
 
 export class CreateApplicationDto {
   @IsUUID()
@@ -49,5 +50,6 @@ export class CreateApplicationDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(FREE_TEXT_MAX_LENGTH)
   notes?: string;
 }

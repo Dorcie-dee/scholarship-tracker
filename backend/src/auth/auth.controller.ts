@@ -26,6 +26,7 @@ import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { Public } from './decorators/public.decorator';
+import { StrictRateLimit } from '../common/decorators/strict-rate-limit.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import type { AuthenticatedUser } from './decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
@@ -45,6 +46,7 @@ export class AuthController {
 
   @Public()
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @StrictRateLimit()
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   async register(
@@ -62,6 +64,7 @@ export class AuthController {
 
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @StrictRateLimit()
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(
@@ -84,6 +87,7 @@ export class AuthController {
   // phase-1o5.txt §7/§12, "protect obvious abuse without breaking legitimate
   // token rotation behavior".
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @StrictRateLimit()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refresh(
@@ -153,6 +157,7 @@ export class AuthController {
   // rate-limit against arbitrary accounts in the first place, on top of the
   // IP-based throttle below and the OTP's own attempt-limit.
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @StrictRateLimit()
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
   async verifyEmail(
@@ -164,6 +169,7 @@ export class AuthController {
   }
 
   @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @StrictRateLimit()
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
   async resendVerification(
@@ -206,6 +212,7 @@ export class AuthController {
   // "account exists but email failed" from "account doesn't exist".
   @Public()
   @Throttle({ default: { limit: 3, ttl: 900_000 } })
+  @StrictRateLimit()
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   async forgotPassword(
@@ -238,6 +245,7 @@ export class AuthController {
 
   @Public()
   @Throttle({ default: { limit: 5, ttl: 900_000 } })
+  @StrictRateLimit()
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   async resetPassword(

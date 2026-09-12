@@ -1,6 +1,13 @@
 import { TaskDependencyType, TaskStatus } from '../types';
 import { TasksService } from './tasks.service';
 
+// Shared across every describe block below — TasksService's constructor
+// gained a ConfigService dependency (Batch 4, pagination) that none of
+// these pre-existing describe blocks otherwise need to configure.
+const configServiceMock = {
+  get: jest.fn(() => ({ defaultPageSize: 25, maxPageSize: 100 })),
+} as any;
+
 /**
  * Covers the guarantee documented on Task.dependsOnTaskId/dependencyType
  * (see task.entity.ts): dependency metadata is informational only and must
@@ -27,6 +34,22 @@ describe('TasksService — dependency metadata is never enforced', () => {
         return withId;
       }),
       findOne: jest.fn(async ({ where: { id } }: any) => rows.get(id) ?? null),
+      createQueryBuilder: jest.fn(() => {
+        let targetId: string | undefined;
+        const builder: any = {
+          innerJoinAndSelect: jest.fn(() => builder),
+          leftJoin: jest.fn(() => builder),
+          where: jest.fn((_sql: string, params: { id: string }) => {
+            targetId = params.id;
+            return builder;
+          }),
+          andWhere: jest.fn(() => builder),
+          getOne: jest.fn(async () =>
+            targetId ? (rows.get(targetId) ?? null) : null,
+          ),
+        };
+        return builder;
+      }),
       find: jest.fn(async () => [...rows.values()]),
     };
     journeysService = { findOwnedOrThrow: jest.fn(async () => journey) };
@@ -38,6 +61,7 @@ describe('TasksService — dependency metadata is never enforced', () => {
       journeysService,
       applicationsService,
       requirementsService,
+      configServiceMock,
     );
   });
 
@@ -138,6 +162,7 @@ describe('TasksService — parallelized validation checks', () => {
       journeysService,
       applicationsService,
       requirementsService,
+      configServiceMock,
     );
   });
 
@@ -222,6 +247,22 @@ describe('TasksService — dependency scope validation (C2)', () => {
         return withId;
       }),
       findOne: jest.fn(async ({ where: { id } }: any) => rows.get(id) ?? null),
+      createQueryBuilder: jest.fn(() => {
+        let targetId: string | undefined;
+        const builder: any = {
+          innerJoinAndSelect: jest.fn(() => builder),
+          leftJoin: jest.fn(() => builder),
+          where: jest.fn((_sql: string, params: { id: string }) => {
+            targetId = params.id;
+            return builder;
+          }),
+          andWhere: jest.fn(() => builder),
+          getOne: jest.fn(async () =>
+            targetId ? (rows.get(targetId) ?? null) : null,
+          ),
+        };
+        return builder;
+      }),
       find: jest.fn(async () => [...rows.values()]),
     };
     // Echoes back whichever journeyId is requested, scoped to this user —
@@ -242,6 +283,7 @@ describe('TasksService — dependency scope validation (C2)', () => {
       journeysService,
       applicationsService,
       requirementsService,
+      configServiceMock,
     );
   });
 
@@ -434,6 +476,22 @@ describe('TasksService — update() cross-consistency (C2.5)', () => {
         return row;
       }),
       findOne: jest.fn(async ({ where: { id } }: any) => rows.get(id) ?? null),
+      createQueryBuilder: jest.fn(() => {
+        let targetId: string | undefined;
+        const builder: any = {
+          innerJoinAndSelect: jest.fn(() => builder),
+          leftJoin: jest.fn(() => builder),
+          where: jest.fn((_sql: string, params: { id: string }) => {
+            targetId = params.id;
+            return builder;
+          }),
+          andWhere: jest.fn(() => builder),
+          getOne: jest.fn(async () =>
+            targetId ? (rows.get(targetId) ?? null) : null,
+          ),
+        };
+        return builder;
+      }),
       find: jest.fn(),
     };
     journeysService = {
@@ -454,6 +512,7 @@ describe('TasksService — update() cross-consistency (C2.5)', () => {
       journeysService,
       applicationsService,
       requirementsService,
+      configServiceMock,
     );
   });
 
@@ -487,5 +546,308 @@ describe('TasksService — update() cross-consistency (C2.5)', () => {
 
     expect(updated.title).toBe('Renamed task');
     expect(applicationsService.findOwnedOrThrow).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Track 1 Group E (E2) — ownership failures normalize to 404, uniformly with
+ * "doesn't exist at all" — see common/utils/ownership.ts's doc comment. Uses
+ * the REAL findOwnedOrThrow()/assertOwnership() path.
+ */
+describe('TasksService — ownership normalizes to 404 (Track 1 Group E)', () => {
+  const ownerId = 'user-1';
+  const otherUserId = 'user-2';
+
+  let tasks: any;
+  let service: TasksService;
+
+  beforeEach(() => {
+    const rows = new Map<string, any>([
+      ['task-owned', { id: 'task-owned', journey: { userId: ownerId } }],
+      [
+        'task-foreign',
+        { id: 'task-foreign', journey: { userId: otherUserId } },
+      ],
+    ]);
+    tasks = {
+      save: jest.fn(async (row: any) => row),
+      findOne: jest.fn(async ({ where: { id } }: any) => rows.get(id) ?? null),
+      createQueryBuilder: jest.fn(() => {
+        let targetId: string | undefined;
+        const builder: any = {
+          innerJoinAndSelect: jest.fn(() => builder),
+          leftJoin: jest.fn(() => builder),
+          where: jest.fn((_sql: string, params: { id: string }) => {
+            targetId = params.id;
+            return builder;
+          }),
+          andWhere: jest.fn(() => builder),
+          getOne: jest.fn(async () =>
+            targetId ? (rows.get(targetId) ?? null) : null,
+          ),
+        };
+        return builder;
+      }),
+      delete: jest.fn(async (id: string) => {
+        rows.delete(id);
+      }),
+    };
+    service = new TasksService(
+      tasks,
+      {} as any,
+      {} as any,
+      {} as any,
+      configServiceMock,
+    );
+  });
+
+  it('a foreign-owned task 404s, not 403s', async () => {
+    await expect(
+      service.findOwnedOrThrow('task-foreign', ownerId),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('a nonexistent task also 404s, identically', async () => {
+    await expect(
+      service.findOwnedOrThrow('task-does-not-exist', ownerId),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('the legitimate owner can still access their own task', async () => {
+    const task = await service.findOwnedOrThrow('task-owned', ownerId);
+    expect(task.id).toBe('task-owned');
+  });
+
+  it('remove() on a foreign-owned task 404s and deletes nothing', async () => {
+    await expect(service.remove('task-foreign', ownerId)).rejects.toMatchObject(
+      { status: 404 },
+    );
+    expect(tasks.delete).not.toHaveBeenCalled();
+  });
+});
+
+/** Production hardening (Batch 4) — findAllForUser() is keyset-paginated and stays journey-userId-scoped. */
+describe('TasksService — findAllForUser pagination (Batch 4)', () => {
+  const ownerId = 'user-1';
+  let tasks: any;
+  let service: TasksService;
+
+  beforeEach(() => {
+    const rows = [
+      {
+        id: 't-1',
+        journeyUserId: ownerId,
+        applicationId: null,
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+      },
+      {
+        id: 't-2',
+        journeyUserId: ownerId,
+        applicationId: 'app-1',
+        createdAt: new Date('2026-02-01T00:00:00Z'),
+      },
+      {
+        id: 't-3',
+        journeyUserId: 'user-2',
+        applicationId: null,
+        createdAt: new Date('2026-03-01T00:00:00Z'),
+      },
+    ];
+    const qb: any = {
+      innerJoin: jest.fn(() => qb),
+      leftJoin: jest.fn(() => qb),
+      andWhere: jest.fn((_sql: string, params: any) => {
+        qb.__where = { ...(qb.__where ?? {}), ...params };
+        return qb;
+      }),
+      orderBy: jest.fn(() => qb),
+      addOrderBy: jest.fn(() => qb),
+      take: jest.fn(() => qb),
+      getMany: jest.fn(async () =>
+        rows
+          .filter((r) => r.journeyUserId === qb.__where.userId)
+          .filter((r) =>
+            qb.__where.applicationId
+              ? r.applicationId === qb.__where.applicationId
+              : true,
+          )
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
+      ),
+    };
+    tasks = { createQueryBuilder: jest.fn(() => qb) };
+    service = new TasksService(
+      tasks,
+      {} as any,
+      {} as any,
+      {} as any,
+      configServiceMock,
+    );
+  });
+
+  it("only returns tasks belonging to the requesting user's own journeys", async () => {
+    const result = await service.findAllForUser(ownerId, {}, {});
+    expect(result.items.map((r: any) => r.id).sort()).toEqual(['t-1', 't-2']);
+  });
+
+  it('additionally filters by applicationId, still within the owned set', async () => {
+    const result = await service.findAllForUser(
+      ownerId,
+      { applicationId: 'app-1' },
+      {},
+    );
+    expect(result.items.map((r: any) => r.id)).toEqual(['t-2']);
+  });
+});
+
+/**
+ * Track 2, §0 — product rule: a soft-deleted Application's Tasks must not
+ * remain normally retrievable, even though a Task's own ownership anchor is
+ * its Journey (never soft-deleted itself). These mocks model the real SQL
+ * shape (`(task.applicationId IS NULL OR application.deletedAt IS NULL)`)
+ * rather than ignoring it, unlike the other describe blocks in this file
+ * (which don't exercise this behavior at all) — see tasks.service.ts's
+ * `findWithJourneyOrThrow()`/`findAllForUser()` doc comments.
+ */
+describe('TasksService — soft-deleted Application hides its Tasks (Track 2 §0)', () => {
+  const ownerId = 'user-1';
+
+  const makeRows = () => [
+    {
+      id: 'task-no-app',
+      journeyId: 'journey-1',
+      journeyUserId: ownerId,
+      applicationId: null,
+      application: null,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+    },
+    {
+      id: 'task-active-app',
+      journeyId: 'journey-1',
+      journeyUserId: ownerId,
+      applicationId: 'app-active',
+      application: { id: 'app-active', deletedAt: null },
+      createdAt: new Date('2026-02-01T00:00:00Z'),
+    },
+    {
+      id: 'task-deleted-app',
+      journeyId: 'journey-1',
+      journeyUserId: ownerId,
+      applicationId: 'app-deleted',
+      application: {
+        id: 'app-deleted',
+        deletedAt: new Date('2026-03-01T00:00:00Z'),
+      },
+      createdAt: new Date('2026-03-01T00:00:00Z'),
+    },
+  ];
+
+  // Faithfully evaluates the production WHERE clause
+  // `(task.applicationId IS NULL OR application.deletedAt IS NULL)` against
+  // the mocked rows, rather than assuming the code is correct.
+  const passesApplicationVisibilityFilter = (row: any) =>
+    row.applicationId === null || row.application?.deletedAt == null;
+
+  describe('findOwnedOrThrow (single-record lookup)', () => {
+    let tasks: any;
+    let service: TasksService;
+
+    beforeEach(() => {
+      const rows = new Map(makeRows().map((r) => [r.id, r]));
+      tasks = {
+        createQueryBuilder: jest.fn(() => {
+          let targetId: string | undefined;
+          const builder: any = {
+            innerJoinAndSelect: jest.fn(() => builder),
+            leftJoin: jest.fn(() => builder),
+            where: jest.fn((_sql: string, params: { id: string }) => {
+              targetId = params.id;
+              return builder;
+            }),
+            andWhere: jest.fn(() => builder),
+            getOne: jest.fn(async () => {
+              if (!targetId) return null;
+              const row = rows.get(targetId);
+              if (!row || !passesApplicationVisibilityFilter(row)) return null;
+              return { ...row, journey: { userId: ownerId } };
+            }),
+          };
+          return builder;
+        }),
+      };
+      service = new TasksService(
+        tasks,
+        {} as any,
+        {} as any,
+        {} as any,
+        configServiceMock,
+      );
+    });
+
+    it('a task with no Application (journey-level) remains retrievable', async () => {
+      const task = await service.findOwnedOrThrow('task-no-app', ownerId);
+      expect(task.id).toBe('task-no-app');
+    });
+
+    it('a task whose Application is still active remains retrievable', async () => {
+      const task = await service.findOwnedOrThrow('task-active-app', ownerId);
+      expect(task.id).toBe('task-active-app');
+    });
+
+    it('a task whose Application is soft-deleted 404s — not normally retrievable', async () => {
+      await expect(
+        service.findOwnedOrThrow('task-deleted-app', ownerId),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
+  describe('findAllForUser (list)', () => {
+    let tasks: any;
+    let service: TasksService;
+
+    beforeEach(() => {
+      const rows = makeRows();
+      const qb: any = {
+        innerJoin: jest.fn(() => qb),
+        leftJoin: jest.fn(() => qb),
+        andWhere: jest.fn(() => qb),
+        orderBy: jest.fn(() => qb),
+        addOrderBy: jest.fn(() => qb),
+        take: jest.fn(() => qb),
+        getMany: jest.fn(async () =>
+          rows
+            .filter((r) => r.journeyUserId === ownerId)
+            .filter(passesApplicationVisibilityFilter)
+            .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
+        ),
+      };
+      tasks = { createQueryBuilder: jest.fn(() => qb) };
+      service = new TasksService(
+        tasks,
+        {} as any,
+        {} as any,
+        {} as any,
+        configServiceMock,
+      );
+    });
+
+    it('excludes a task whose Application is soft-deleted from the list, even filtered only by journeyId', async () => {
+      const result = await service.findAllForUser(
+        ownerId,
+        { journeyId: 'journey-1' },
+        {},
+      );
+      expect(result.items.map((r: any) => r.id).sort()).toEqual([
+        'task-active-app',
+        'task-no-app',
+      ]);
+    });
+
+    it('still includes journey-level and active-application tasks', async () => {
+      const result = await service.findAllForUser(ownerId, {}, {});
+      const ids = result.items.map((r: any) => r.id);
+      expect(ids).toContain('task-no-app');
+      expect(ids).toContain('task-active-app');
+      expect(ids).not.toContain('task-deleted-app');
+    });
   });
 });

@@ -8,27 +8,28 @@ import { Reflector } from '@nestjs/core';
 import { UserRole } from '../../types';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 import type { AuthenticatedUser } from '../decorators/current-user.decorator';
+import { UsersService } from '../../users/users.service';
 
 /**
  * Registered globally as a THIRD APP_GUARD, alongside JwtAuthGuard and
- * ThrottlerGuard (see app.module.ts) — not a competing/parallel
- * authorization system, the same enhancer pattern extended once more.
- * MUST be registered after JwtAuthGuard in the providers array: it reads
- * `request.user`, which only JwtAuthGuard's underlying JwtStrategy populates
- * (confirmed global-guard execution follows providers-array order — see
- * node_modules/@nestjs/core/application-config.js's addGlobalGuard, a plain
- * array push, and guards-context-creator.js, which returns it as-is).
+ * ThrottlerGuard (see app.module.ts). MUST be registered after JwtAuthGuard:
+ * it reads `request.user`, which only JwtAuthGuard's JwtStrategy populates.
  *
- * No @Roles() on a route/controller = no restriction (returns true
- * immediately) — same opt-in-to-restriction shape as @Public() is
- * opt-out-of-authentication, so most routes are entirely unaffected by this
- * guard's existence.
+ * No @Roles() on a route/controller = no restriction and **no DB lookup** —
+ * ordinary routes stay free of an extra query.
+ *
+ * When @Roles() is present, authorization uses the user's **current** role
+ * from the database (not the possibly-stale JWT claim), so demotion takes
+ * effect immediately for admin-only routes.
  */
 @Injectable()
 export class RolesGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly usersService: UsersService,
+  ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const requiredRoles = this.reflector.getAllAndOverride<
       UserRole[] | undefined
     >(ROLES_KEY, [context.getHandler(), context.getClass()]);
@@ -49,9 +50,13 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Insufficient role for this resource');
     }
 
-    if (!requiredRoles.includes(user.role)) {
+    const currentRole = await this.usersService.getRoleById(user.userId);
+    if (!currentRole || !requiredRoles.includes(currentRole)) {
       throw new ForbiddenException('Insufficient role for this resource');
     }
+
+    // Keep request.user.role aligned with the live value for downstream code.
+    user.role = currentRole;
 
     return true;
   }

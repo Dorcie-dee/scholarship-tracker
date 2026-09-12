@@ -7,6 +7,7 @@ import { Requirement } from '../requirements/entities/requirement.entity';
 import { ApplicationsService } from './applications.service';
 import { ApplicationDocumentsService } from './application-documents.service';
 import { ApplicationSnapshotsService } from './application-snapshots.service';
+import { ApplicationPurgeService } from './application-purge.service';
 import { ApplicationsController } from './applications.controller';
 import { JourneysModule } from '../journeys/journeys.module';
 import { OpportunitiesModule } from '../opportunities/opportunities.module';
@@ -46,6 +47,7 @@ import { ProfileModule } from '../profile/profile.module';
     ApplicationsService,
     ApplicationDocumentsService,
     ApplicationSnapshotsService,
+    ApplicationPurgeService,
   ],
   exports: [
     ApplicationsService,

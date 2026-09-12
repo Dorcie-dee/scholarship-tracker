@@ -1,4 +1,8 @@
-import { RequirementStatus, RequirementType } from '../../types';
+import {
+  RequirementStatus,
+  RequirementSuggestionSource,
+  RequirementType,
+} from '../../types';
 import { Check, Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { Opportunity } from '../../opportunities/entities/opportunity.entity';
@@ -13,9 +17,10 @@ import { Application } from '../../applications/entities/application.entity';
  * model with explicit Evidence linking. This is intentional and documented as
  * a point to revisit once real usage reveals whether the distinction matters.
  *
- * `status` intentionally includes AI-oriented states (PROFILE_MATCH,
- * AI_ASSESSMENT) so the schema won't need to change when AI evaluation is
- * added later — nothing in this phase writes those states (spec §29, no AI yet).
+ * `status` is the authoritative user-facing state. AI may only write the
+ * separate `suggested*` columns; an explicit confirm action copies a
+ * suggestion into `status`. PROFILE_MATCH / AI_ASSESSMENT remain valid
+ * suggested (and confirmed) values from the existing enum.
  *
  * Group B / F5: `RequirementsService.create()` already enforces "at least
  * one of opportunityId/applicationId" at the service layer — this CHECK
@@ -94,4 +99,32 @@ export class Requirement extends BaseEntity {
 
   @Column({ type: 'text', nullable: true })
   notes: string | null;
+
+  /** Pending AI suggestion — never authoritative until the user confirms. */
+  @Column({
+    type: 'enum',
+    enum: RequirementStatus,
+    name: 'suggested_status',
+    nullable: true,
+  })
+  suggestedStatus: RequirementStatus | null;
+
+  @Column({ type: 'timestamptz', name: 'suggested_at', nullable: true })
+  suggestedAt: Date | null;
+
+  @Column({
+    type: 'varchar',
+    length: 1000,
+    name: 'suggestion_rationale',
+    nullable: true,
+  })
+  suggestionRationale: string | null;
+
+  @Column({
+    type: 'enum',
+    enum: RequirementSuggestionSource,
+    name: 'suggestion_source',
+    nullable: true,
+  })
+  suggestionSource: RequirementSuggestionSource | null;
 }

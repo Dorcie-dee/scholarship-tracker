@@ -11,6 +11,7 @@ import { UsersService } from '../users/users.service';
 import { ProfileService } from '../profile/profile.service';
 import { EmailVerificationService } from './email-verification.service';
 import { EmailService } from '../common/email/email.service';
+import { LoginGuardService } from './login-guard.service';
 import { User } from '../users/entities/user.entity';
 import { RefreshSession } from './entities/refresh-session.entity';
 
@@ -60,6 +61,7 @@ export class AuthService {
     private readonly profileService: ProfileService,
     private readonly emailVerificationService: EmailVerificationService,
     private readonly emailService: EmailService,
+    private readonly loginGuardService: LoginGuardService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService<AppConfig, true>,
     @InjectRepository(RefreshSession)
@@ -117,12 +119,33 @@ export class AuthService {
     return user;
   }
 
+  /**
+   * Production hardening (Batch 2) — wraps credential validation with the
+   * account-scoped brute-force throttle (see login-guard.service.ts):
+   * checked before validating credentials at all (so a currently-throttled
+   * account never even reaches a bcrypt compare), reset on success, recorded
+   * on a genuine bad-credentials failure. Any OTHER kind of failure
+   * (unexpected error) does not count as a "failed attempt" — only a
+   * confirmed wrong email/password does.
+   */
   async login(
     email: string,
     password: string,
     meta: RequestMeta,
   ): Promise<{ user: User; tokens: IssuedTokens }> {
-    const user = await this.validateCredentials(email, password);
+    await this.loginGuardService.assertNotLocked(email);
+
+    let user: User;
+    try {
+      user = await this.validateCredentials(email, password);
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        await this.loginGuardService.recordFailure(email);
+      }
+      throw error;
+    }
+
+    await this.loginGuardService.recordSuccess(email);
     const tokens = await this.issueTokens(user, meta);
     return { user, tokens };
   }
@@ -158,6 +181,11 @@ export class AuthService {
         // that instead of the raw config string sidesteps its narrower
         // template-literal type (e.g. "15m") that our config string can't match.
         expiresIn: Math.floor(accessTokenExpiresInMs / 1000),
+        // Production hardening (Batch 10) — explicit, matching JwtStrategy's
+        // pinned `algorithms: ['HS256']` (see jwt.strategy.ts). Was already
+        // jsonwebtoken's default, but stating it here makes the algorithm a
+        // deliberate, auditable choice rather than an implicit one.
+        algorithm: 'HS256',
       },
     );
     const accessTokenExpiresAt = new Date(Date.now() + accessTokenExpiresInMs);

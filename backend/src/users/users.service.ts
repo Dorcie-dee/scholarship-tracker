@@ -1,26 +1,39 @@
 import {
+  BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { QueryFailedError, Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
+import { DataSource, QueryFailedError, Repository } from 'typeorm';
 import { UserRole } from '../types';
+import { AppConfig } from '../config/configuration';
+import {
+  applyKeysetPagination,
+  buildPaginatedResult,
+  decodeCursor,
+  PaginatedResult,
+  resolvePageSize,
+} from '../common/pagination/cursor';
+import { likeContainsPattern } from '../common/utils/like-escape';
 import { User } from './entities/user.entity';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateUserRoleDto } from './dto/update-user-role.dto';
+import { ListUsersQueryDto } from './dto/list-users-query.dto';
+import {
+  AdminUserDirectoryItemDto,
+  toAdminUserDirectoryItem,
+} from './dto/admin-user-directory-item.dto';
 
 const POSTGRES_UNIQUE_VIOLATION = '23505';
 
 /**
  * The single normalization rule for email lookups/storage across this app:
  * trim + lowercase. Applied here (inside findByEmail) rather than only at the
- * DTO boundary, so EVERY caller — login, registration's duplicate check,
- * password reset, a future admin tool, a seed script — gets consistent
- * behavior regardless of what casing was typed in. Before this fix,
- * findByEmail queried with the caller's raw casing while createUser() stored
- * a lowercased value, so a user who registered as "Jane@Example.com" could
- * not log in typing that same casing back — see docs/decisions.md, "Email
- * normalization".
+ * DTO boundary, so EVERY caller gets consistent behavior.
  */
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -28,16 +41,15 @@ export function normalizeEmail(email: string): string {
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    private readonly dataSource: DataSource,
+    private readonly configService: ConfigService<AppConfig, true>,
   ) {}
 
-  /**
-   * `withPasswordHash` opts in to selecting the (by default excluded-from-
-   * serialization, but not excluded-from-query) passwordHash column — needed
-   * only by AuthService when verifying credentials.
-   */
   findByEmail(email: string, withPasswordHash = false): Promise<User | null> {
     const normalized = normalizeEmail(email);
     if (!withPasswordHash) {
@@ -62,6 +74,81 @@ export class UsersService {
     return user;
   }
 
+  /**
+   * Current role from the database — used by RolesGuard for @Roles() checks
+   * so a demoted admin cannot keep using a stale JWT claim.
+   */
+  async getRoleById(userId: string): Promise<UserRole | null> {
+    const row = await this.usersRepository.findOne({
+      where: { id: userId },
+      select: { id: true, role: true },
+    });
+    return row?.role ?? null;
+  }
+
+  /**
+   * ADMIN-only directory: keyset-paginated, searchable, never returns secrets.
+   * Ordered by (createdAt, id) DESC — newest accounts first.
+   */
+  async findAllForAdmin(
+    query: ListUsersQueryDto,
+  ): Promise<PaginatedResult<AdminUserDirectoryItemDto>> {
+    const { defaultPageSize, maxPageSize } = this.configService.get(
+      'pagination',
+      { infer: true },
+    );
+    const limit = resolvePageSize(query.limit, {
+      defaultPageSize,
+      maxPageSize,
+    });
+    const direction = query.order === 'asc' ? 'ASC' : 'DESC';
+
+    const qb = this.usersRepository
+      .createQueryBuilder('user')
+      .select([
+        'user.id',
+        'user.email',
+        'user.name',
+        'user.role',
+        'user.isVerified',
+        'user.createdAt',
+      ]);
+
+    if (query.role) {
+      qb.andWhere('user.role = :role', { role: query.role });
+    }
+
+    const search = query.search?.trim();
+    if (search) {
+      qb.andWhere(
+        "(user.email ILIKE :search ESCAPE '\\' OR user.name ILIKE :search ESCAPE '\\')",
+        { search: likeContainsPattern(search) },
+      );
+    }
+
+    applyKeysetPagination(
+      qb,
+      'user.createdAt',
+      'user.id',
+      direction,
+      query.cursor ? decodeCursor(query.cursor) : undefined,
+      limit,
+    );
+
+    const rows = await qb.getMany();
+    const page = buildPaginatedResult(
+      rows,
+      limit,
+      (r) => r.createdAt.toISOString(),
+      (r) => r.id,
+    );
+    return {
+      items: page.items.map(toAdminUserDirectoryItem),
+      nextCursor: page.nextCursor,
+      hasNextPage: page.hasNextPage,
+    };
+  }
+
   async createUser(params: {
     email: string;
     passwordHash: string;
@@ -76,24 +163,11 @@ export class UsersService {
       passwordHash: params.passwordHash,
       name: params.name ?? null,
       isVerified: false,
-      // Explicit, not relied-on-via-DB-default: `params` has no `role` field
-      // at all (TypeScript itself refuses to compile a caller trying to pass
-      // one), and this line is the one place that decides a new account's
-      // role — every account created through this service starts as the
-      // least-privileged role. See docs/decisions.md, "Privilege escalation
-      // — every path checked".
       role: UserRole.USER,
     });
     try {
       return await this.usersRepository.save(user);
     } catch (error) {
-      // Closes the race window between the check above and this insert: if
-      // two requests for the same email land close enough together, both can
-      // pass the check before either commits. The email column's unique index
-      // then rejects the second insert — translate that specific failure into
-      // the same ConflictException the check above gives, instead of letting
-      // a raw QueryFailedError surface as an unhandled 500. Any other kind of
-      // database failure still propagates unchanged.
       if (
         error instanceof QueryFailedError &&
         (error as unknown as { code?: string }).code ===
@@ -108,26 +182,7 @@ export class UsersService {
   }
 
   /**
-   * Moved here from UsersController (Track 1, A1.3) — the controller
-   * previously called `Repository<User>.update()` directly, the only place
-   * in this codebase a controller talked to the database itself. Same query
-   * shape as before (one UPDATE, then one SELECT via getByIdOrThrow) —
-   * deliberately not switched to a read-modify-write pattern, since that
-   * would be a behavior change this checkpoint doesn't call for.
-   *
-   * Explicit field allowlist (Track 1, Group B RBAC hardening) — deliberately
-   * NOT `this.usersRepository.update(userId, dto)` passing the whole DTO
-   * through. `UpdateUserDto` doesn't declare `role` today, and the global
-   * ValidationPipe (`whitelist: true, forbidNonWhitelisted: true`) already
-   * rejects an unknown field at the HTTP boundary either way — but this
-   * method is a second, independent line of defense against privilege
-   * escalation: even if a future change ever added a field to
-   * `UpdateUserDto` without thinking through its implications, or a
-   * different, less-careful caller invoked this service directly with a
-   * hand-built object, `role` (and passwordHash — never intended to be
-   * settable through this path either) still could not be written through
-   * here, because nothing but the fields explicitly picked below is ever
-   * passed to the repository.
+   * Explicit field allowlist — never passes `role` or `passwordHash`.
    */
   async update(userId: string, dto: UpdateUserDto): Promise<User> {
     const allowedUpdate: Pick<UpdateUserDto, 'name'> = {};
@@ -140,5 +195,61 @@ export class UsersService {
 
   async markVerified(userId: string): Promise<void> {
     await this.usersRepository.update(userId, { isVerified: true });
+  }
+
+  /**
+   * ADMIN-only role change for another user. Self-change forbidden;
+   * demoting the last remaining ADMIN forbidden. Atomic under a transaction.
+   */
+  async updateRole(
+    actorUserId: string,
+    targetUserId: string,
+    dto: UpdateUserRoleDto,
+  ): Promise<User> {
+    if (actorUserId === targetUserId) {
+      throw new ForbiddenException('You cannot change your own role');
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(User);
+      const target = await repo.findOne({
+        where: { id: targetUserId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!target) {
+        throw new NotFoundException('User not found');
+      }
+
+      const previousRole = target.role;
+      if (previousRole === dto.role) {
+        return target;
+      }
+
+      if (previousRole === UserRole.ADMIN && dto.role === UserRole.USER) {
+        const adminCount = await repo.count({
+          where: { role: UserRole.ADMIN },
+        });
+        if (adminCount <= 1) {
+          throw new BadRequestException(
+            'Cannot demote the last remaining administrator',
+          );
+        }
+      }
+
+      target.role = dto.role;
+      const saved = await repo.save(target);
+
+      this.logger.log(
+        JSON.stringify({
+          event: 'user.role_changed',
+          actorUserId,
+          targetUserId,
+          previousRole,
+          newRole: dto.role,
+        }),
+      );
+
+      return saved;
+    });
   }
 }

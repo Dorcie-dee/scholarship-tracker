@@ -12,6 +12,8 @@ import { User } from '../users/entities/user.entity';
 import { AuthService } from './auth.service';
 import { EmailVerificationService } from './email-verification.service';
 import { PasswordResetService } from './password-reset.service';
+import { AuthCleanupService } from './auth-cleanup.service';
+import { LoginGuardService } from './login-guard.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
@@ -42,6 +44,13 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     AuthService,
     EmailVerificationService,
     PasswordResetService,
+    // Production hardening (Batch 2) — hourly cleanup of expired/consumed/
+    // invalidated auth artifacts; see its own doc comment.
+    AuthCleanupService,
+    // Production hardening (Batch 2) — account-scoped login brute-force
+    // protection, additive to the existing IP-based @Throttle() on
+    // POST /auth/login; see its own doc comment.
+    LoginGuardService,
     JwtStrategy,
   ],
   exports: [AuthService],

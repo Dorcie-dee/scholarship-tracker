@@ -166,6 +166,25 @@ export enum SourceAuthorityLevel {
 }
 
 /**
+ * Whether OpportunitySource excerpt/name fields were typed by the user or
+ * filled by the server-side URL fetcher (`autoFetch` / fetch-preview flow).
+ */
+export enum ContentOrigin {
+  MANUAL = 'manual',
+  FETCHED = 'fetched',
+}
+
+/**
+ * Where a pending AI requirement suggestion came from. The authoritative
+ * `Requirement.status` is never set by the provider — only by an explicit
+ * user confirm action.
+ */
+export enum RequirementSuggestionSource {
+  HEURISTIC = 'heuristic',
+  EXTERNAL = 'external',
+}
+
+/**
  * How an ApplicationSnapshot came to exist. Both values require an explicit
  * user action — nothing ever creates a snapshot automatically (see
  * docs/decisions.md, "Application Snapshot creation model").

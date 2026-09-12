@@ -15,6 +15,7 @@ import { UserRole } from '../types';
 import { UniversitiesService } from './universities.service';
 import { CreateUniversityDto } from './dto/create-university.dto';
 import { UpdateUniversityDto } from './dto/update-university.dto';
+import { ListUniversitiesQueryDto } from './dto/list-universities-query.dto';
 
 /**
  * Read access is unrestricted (any authenticated user — shared catalog
@@ -34,8 +35,8 @@ export class UniversitiesController {
   }
 
   @Get()
-  findAll(@Query('search') search?: string) {
-    return this.universitiesService.findAll(search);
+  findAll(@Query() query: ListUniversitiesQueryDto) {
+    return this.universitiesService.findAll(query);
   }
 
   @Get(':id')

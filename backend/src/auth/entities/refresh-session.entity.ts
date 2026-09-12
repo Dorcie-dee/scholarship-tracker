@@ -20,6 +20,16 @@ export class RefreshSession extends BaseEntity {
   @JoinColumn({ name: 'user_id' })
   user: User;
 
+  /**
+   * Production hardening (Batch 2) — indexed: `logoutAll()`,
+   * `listActiveSessions()` (`GET /auth/sessions`), and the refresh-token
+   * reuse-detection sweep inside every `refresh()` call all filter by this
+   * column. Without an index, all three become sequential scans on a table
+   * that (per-user session churn, no automatic purge before this batch)
+   * grows without bound — a hot, security-critical path degrading with
+   * scale. See docs/decisions.md, "refresh_sessions.user_id index".
+   */
+  @Index()
   @Column({ type: 'uuid', name: 'user_id' })
   userId: string;
 

@@ -1,19 +1,69 @@
 import { NotFoundException } from '@nestjs/common';
 import { ProgrammesService } from './programmes.service';
 
-/** Track 1 Group B — closes this service's previous zero-test-coverage gap. */
+/**
+ * Track 1 Group B — closes this service's previous zero-test-coverage gap.
+ * Production hardening (Batch 4) — `findAll()` rewritten as keyset
+ * pagination; see universities.service.spec.ts's doc comment for the fake
+ * `createQueryBuilder()` approach used here too.
+ */
 describe('ProgrammesService', () => {
   let programmes: any;
   let universitiesService: any;
+  let configService: any;
   let service: ProgrammesService;
+  let rows: any[];
+
+  const makeQueryBuilder = () => {
+    let universityId: string | undefined;
+    let cursorSortValue: string | undefined;
+    let cursorId: string | undefined;
+    let limit = Infinity;
+
+    const qb: any = {
+      andWhere: jest.fn((_sql: string, params: any) => {
+        if ('universityId' in params) universityId = params.universityId;
+        if ('cursorSortValue' in params) {
+          cursorSortValue = params.cursorSortValue;
+          cursorId = params.cursorId;
+        }
+        return qb;
+      }),
+      orderBy: jest.fn(() => qb),
+      addOrderBy: jest.fn(() => qb),
+      take: jest.fn((n: number) => {
+        limit = n;
+        return qb;
+      }),
+      getMany: jest.fn(async () => {
+        let result = [...rows];
+        if (universityId) {
+          result = result.filter((r) => r.universityId === universityId);
+        }
+        result.sort(
+          (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
+        );
+        if (cursorSortValue !== undefined) {
+          result = result.filter(
+            (r) =>
+              r.name > cursorSortValue! ||
+              (r.name === cursorSortValue && r.id > cursorId!),
+          );
+        }
+        return result.slice(0, limit);
+      }),
+    };
+    return qb;
+  };
 
   beforeEach(() => {
+    rows = [];
     programmes = {
       create: jest.fn((partial: any) => ({ ...partial })),
       save: jest.fn(async (row: any) => ({ id: 'programme-1', ...row })),
-      find: jest.fn(async () => []),
       findOne: jest.fn(async () => null),
       delete: jest.fn(async () => ({ affected: 1 })),
+      createQueryBuilder: jest.fn(() => makeQueryBuilder()),
     };
     universitiesService = {
       findOneOrThrow: jest.fn(async (id: string) => ({
@@ -21,7 +71,14 @@ describe('ProgrammesService', () => {
         name: 'University',
       })),
     };
-    service = new ProgrammesService(programmes, universitiesService);
+    configService = {
+      get: jest.fn(() => ({ defaultPageSize: 25, maxPageSize: 100 })),
+    };
+    service = new ProgrammesService(
+      programmes,
+      universitiesService,
+      configService,
+    );
   });
 
   describe('create', () => {
@@ -53,21 +110,46 @@ describe('ProgrammesService', () => {
     });
   });
 
-  describe('findAll', () => {
-    it('filters by universityId when given', async () => {
-      await service.findAll('university-1');
-      expect(programmes.find).toHaveBeenCalledWith({
-        where: { universityId: 'university-1' },
-        order: { name: 'ASC' },
-      });
+  describe('findAll — pagination', () => {
+    beforeEach(() => {
+      rows = [
+        { id: 'p-1', name: 'MSc AI', universityId: 'university-1' },
+        {
+          id: 'p-2',
+          name: 'MSc Computer Science',
+          universityId: 'university-1',
+        },
+        { id: 'p-3', name: 'BSc Physics', universityId: 'university-2' },
+      ];
     });
 
-    it('lists every programme when no filter is given', async () => {
-      await service.findAll();
-      expect(programmes.find).toHaveBeenCalledWith({
-        where: {},
-        order: { name: 'ASC' },
+    it('filters by universityId when given', async () => {
+      const result = await service.findAll({ universityId: 'university-1' });
+      expect(result.items.map((r: any) => r.id)).toEqual(['p-1', 'p-2']);
+    });
+
+    it('lists every programme, ordered by name, when no filter is given', async () => {
+      const result = await service.findAll({});
+      expect(result.items.map((r: any) => r.name)).toEqual([
+        'BSc Physics',
+        'MSc AI',
+        'MSc Computer Science',
+      ]);
+    });
+
+    it('paginates correctly across a cursor boundary with no duplicates', async () => {
+      const first = await service.findAll({ limit: 2 });
+      expect(first.items).toHaveLength(2);
+      expect(first.hasNextPage).toBe(true);
+
+      const second = await service.findAll({
+        limit: 2,
+        cursor: first.nextCursor!,
       });
+      expect(second.hasNextPage).toBe(false);
+
+      const allIds = [...first.items, ...second.items].map((r: any) => r.id);
+      expect(new Set(allIds).size).toBe(3);
     });
   });
 

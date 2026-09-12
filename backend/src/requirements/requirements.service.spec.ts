@@ -17,12 +17,19 @@ describe('RequirementsService', () => {
   let service: RequirementsService;
 
   beforeEach(() => {
+    const queryBuilder: any = {
+      andWhere: jest.fn(() => queryBuilder),
+      orderBy: jest.fn(() => queryBuilder),
+      addOrderBy: jest.fn(() => queryBuilder),
+      take: jest.fn(() => queryBuilder),
+      getMany: jest.fn(async () => []),
+    };
     requirements = {
       create: jest.fn((partial: any) => ({ ...partial })),
       save: jest.fn(async (row: any) => ({ id: 'requirement-1', ...row })),
-      find: jest.fn(async () => []),
       findOne: jest.fn(async () => null),
       delete: jest.fn(async () => ({ affected: 1 })),
+      createQueryBuilder: jest.fn(() => queryBuilder),
     };
     opportunitiesService = {
       findOneOrThrow: jest.fn(async (id: string) => ({ id })),
@@ -34,6 +41,9 @@ describe('RequirementsService', () => {
       requirements,
       opportunitiesService,
       applicationsService,
+      {
+        get: jest.fn(() => ({ defaultPageSize: 25, maxPageSize: 100 })),
+      } as any,
     );
   });
 
@@ -89,20 +99,20 @@ describe('RequirementsService', () => {
 
   describe('findAll', () => {
     it('rejects when neither filter is provided', async () => {
-      await expect(service.findAll(userId, {})).rejects.toThrow(
+      await expect(service.findAll(userId, {}, {})).rejects.toThrow(
         BadRequestException,
       );
     });
 
     it('checks application ownership before listing application-scoped requirements', async () => {
-      await service.findAll(userId, { applicationId: 'application-1' });
+      await service.findAll(userId, { applicationId: 'application-1' }, {});
       expect(
         applicationsService.assertApplicationOwnedByUser,
       ).toHaveBeenCalledWith('application-1', userId);
     });
 
     it('does not check ownership for an opportunity-only filter', async () => {
-      await service.findAll(userId, { opportunityId: 'opportunity-1' });
+      await service.findAll(userId, { opportunityId: 'opportunity-1' }, {});
       expect(
         applicationsService.assertApplicationOwnedByUser,
       ).not.toHaveBeenCalled();

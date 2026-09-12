@@ -8,14 +8,9 @@ import { Application } from './application.entity';
  * (spec §21) — the counterpart to the Master Profile (ApplicantProfile).
  *
  * Creation is ALWAYS an explicit user action — see `createdVia` and
- * docs/decisions.md ("Application Snapshot creation model"). Nothing in this
- * codebase creates a snapshot automatically (not on status change, not on
- * submission, not on a document change) — a future intelligent layer may
- * SUGGEST creating one based on signals, but the suggestion never creates the
- * row itself; only an explicit user decision does. Once created, a snapshot is
- * never mutated — see application-snapshots.service.ts, which deliberately has
- * no update()/remove() method; subsequent changes to the master profile or
- * documents must never alter an existing snapshot.
+ * docs/decisions.md ("Application Snapshot creation model"). Edits are
+ * append-only: a new row is created with `supersedesSnapshotId` pointing at
+ * the previous revision; historical rows are never mutated in place.
  *
  * `data` is a jsonb blob rather than a fully normalized structure because a
  * snapshot is fundamentally a point-in-time copy — normalizing it would let it
@@ -67,4 +62,20 @@ export class ApplicationSnapshot extends BaseEntity {
    */
   @Column({ type: 'jsonb' })
   data: Record<string, unknown>;
+
+  /**
+   * Append-only edit lineage: when a user "edits" a snapshot, a NEW row is
+   * created whose `supersedesSnapshotId` points at the previous revision.
+   * The previous row is never mutated. Null for the first revision in a chain.
+   */
+  @ManyToOne(() => ApplicationSnapshot, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'supersedes_snapshot_id' })
+  supersedesSnapshot: ApplicationSnapshot | null;
+
+  @Index()
+  @Column({ type: 'uuid', name: 'supersedes_snapshot_id', nullable: true })
+  supersedesSnapshotId: string | null;
 }

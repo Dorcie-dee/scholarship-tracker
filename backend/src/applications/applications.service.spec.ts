@@ -98,6 +98,9 @@ describe('ApplicationsService', () => {
       requirements,
       journeysService,
       opportunitiesService,
+      {
+        get: jest.fn(() => ({ defaultPageSize: 25, maxPageSize: 100 })),
+      } as any,
     );
 
     // Expose a way for tests to seed "existing" opportunity requirements.
@@ -421,5 +424,156 @@ describe('ApplicationsService', () => {
         'opportunity-from-a-different-university',
       );
     });
+  });
+});
+
+/**
+ * Track 1 Group E (E2) — ownership failures normalize to 404, uniformly with
+ * "doesn't exist at all" — see common/utils/ownership.ts's doc comment. Uses
+ * the REAL findOwnedOrThrow()/assertOwnership() path, with a dedicated,
+ * simpler mock (the main describe block's `applications` mock fabricates a
+ * fallback row for any unknown id, which isn't suitable for testing the
+ * "doesn't exist" case).
+ */
+describe('ApplicationsService — ownership normalizes to 404 (Track 1 Group E)', () => {
+  const ownerId = 'user-1';
+  const otherUserId = 'user-2';
+
+  let applications: any;
+  let service: ApplicationsService;
+
+  beforeEach(() => {
+    const rows = new Map<string, any>([
+      [
+        'application-owned',
+        { id: 'application-owned', journey: { userId: ownerId } },
+      ],
+      [
+        'application-foreign',
+        { id: 'application-foreign', journey: { userId: otherUserId } },
+      ],
+    ]);
+    applications = {
+      save: jest.fn(async (row: any) => row),
+      findOne: jest.fn(async ({ where: { id } }: any) => rows.get(id) ?? null),
+      delete: jest.fn(async (id: string) => {
+        rows.delete(id);
+      }),
+      softDelete: jest.fn(async (id: string) => {
+        const row = rows.get(id);
+        if (row) row.deletedAt = new Date();
+      }),
+    };
+    service = new ApplicationsService(
+      applications,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+  });
+
+  it('a foreign-owned application 404s, not 403s', async () => {
+    await expect(
+      service.findOwnedOrThrow('application-foreign', ownerId),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('a nonexistent application also 404s, identically', async () => {
+    await expect(
+      service.findOwnedOrThrow('application-does-not-exist', ownerId),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('the legitimate owner can still access their own application', async () => {
+    const application = await service.findOwnedOrThrow(
+      'application-owned',
+      ownerId,
+    );
+    expect(application.id).toBe('application-owned');
+  });
+
+  it('remove() on a foreign-owned application 404s and deletes nothing', async () => {
+    await expect(
+      service.remove('application-foreign', ownerId),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(applications.softDelete).not.toHaveBeenCalled();
+    expect(applications.delete).not.toHaveBeenCalled();
+  });
+
+  /** Production hardening (Batch 7) — soft-delete, not a hard delete. */
+  it('remove() on an owned application soft-deletes it (never a hard delete)', async () => {
+    await service.remove('application-owned', ownerId);
+
+    expect(applications.softDelete).toHaveBeenCalledWith('application-owned');
+    expect(applications.delete).not.toHaveBeenCalled();
+  });
+});
+
+/** Production hardening (Batch 4) — findAllForUser() is keyset-paginated and stays journey-userId-scoped. */
+describe('ApplicationsService — findAllForUser pagination (Batch 4)', () => {
+  const ownerId = 'user-1';
+  let applications: any;
+  let service: ApplicationsService;
+
+  beforeEach(() => {
+    const rows = [
+      {
+        id: 'a-1',
+        journeyUserId: ownerId,
+        journeyId: 'journey-1',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+      },
+      {
+        id: 'a-2',
+        journeyUserId: ownerId,
+        journeyId: 'journey-2',
+        createdAt: new Date('2026-02-01T00:00:00Z'),
+      },
+      {
+        id: 'a-3',
+        journeyUserId: 'user-2',
+        journeyId: 'journey-3',
+        createdAt: new Date('2026-03-01T00:00:00Z'),
+      },
+    ];
+    const qb: any = {
+      innerJoin: jest.fn(() => qb),
+      andWhere: jest.fn((_sql: string, params: any) => {
+        qb.__where = { ...(qb.__where ?? {}), ...params };
+        return qb;
+      }),
+      orderBy: jest.fn(() => qb),
+      addOrderBy: jest.fn(() => qb),
+      take: jest.fn(() => qb),
+      getMany: jest.fn(async () =>
+        rows
+          .filter((r) => r.journeyUserId === qb.__where.userId)
+          .filter((r) =>
+            qb.__where.journeyId ? r.journeyId === qb.__where.journeyId : true,
+          )
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
+      ),
+    };
+    applications = { createQueryBuilder: jest.fn(() => qb) };
+    service = new ApplicationsService(
+      applications,
+      {} as any,
+      {} as any,
+      {} as any,
+      {
+        get: jest.fn(() => ({ defaultPageSize: 25, maxPageSize: 100 })),
+      } as any,
+    );
+  });
+
+  it("only returns applications belonging to the requesting user's own journeys", async () => {
+    const result = await service.findAllForUser(ownerId, undefined, {});
+    expect(result.items.map((r: any) => r.id).sort()).toEqual(['a-1', 'a-2']);
+  });
+
+  it('additionally filters by journeyId when given, still within the owned set', async () => {
+    const result = await service.findAllForUser(ownerId, 'journey-2', {});
+    expect(result.items.map((r: any) => r.id)).toEqual(['a-2']);
   });
 });

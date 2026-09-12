@@ -19,6 +19,8 @@ import { CreateApplicationDto } from './dto/create-application.dto';
 import { UpdateApplicationDto } from './dto/update-application.dto';
 import { AttachDocumentDto } from './dto/attach-document.dto';
 import { CreateApplicationSnapshotDto } from './dto/create-application-snapshot.dto';
+import { EditApplicationSnapshotDto } from './dto/edit-application-snapshot.dto';
+import { ListApplicationsQueryDto } from './dto/list-applications-query.dto';
 
 @Controller('applications')
 export class ApplicationsController {
@@ -39,9 +41,13 @@ export class ApplicationsController {
   @Get()
   findAll(
     @CurrentUser() user: AuthenticatedUser,
-    @Query('journeyId') journeyId?: string,
+    @Query() query: ListApplicationsQueryDto,
   ) {
-    return this.applicationsService.findAllForUser(user.userId, journeyId);
+    return this.applicationsService.findAllForUser(
+      user.userId,
+      query.journeyId,
+      query,
+    );
   }
 
   @Get(':id')
@@ -67,9 +73,12 @@ export class ApplicationsController {
     await this.applicationsService.remove(id, user.userId);
   }
 
-  // Ownership (of both the application and the document) is enforced entirely
-  // by ApplicationDocumentsService — this controller only extracts the
-  // authenticated user id and route param and passes them through unchanged.
+  /** Owner-only restore of a soft-deleted application (within retention). */
+  @Post(':id/restore')
+  restore(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.applicationsService.restore(id, user.userId);
+  }
+
   @Post(':id/documents')
   attachDocument(
     @CurrentUser() user: AuthenticatedUser,
@@ -90,9 +99,6 @@ export class ApplicationsController {
     );
   }
 
-  // Working-state cleanup only — removes the attachment (join row), never
-  // the underlying Document, never the Cloudinary asset, never an existing
-  // snapshot. See ApplicationDocumentsService.detach()'s doc comment.
   @Delete(':id/documents/:documentId')
   @HttpCode(HttpStatus.NO_CONTENT)
   async detachDocument(
@@ -103,10 +109,6 @@ export class ApplicationsController {
     await this.applicationDocumentsService.detach(user.userId, id, documentId);
   }
 
-  // Ownership is enforced entirely by ApplicationSnapshotsService — this
-  // controller only extracts the authenticated user id and route params and
-  // passes them through unchanged. createdVia is never accepted from the
-  // client (see CreateApplicationSnapshotDto) — the service always sets it.
   @Post(':id/snapshots')
   createSnapshot(
     @CurrentUser() user: AuthenticatedUser,
@@ -138,5 +140,31 @@ export class ApplicationsController {
       id,
       snapshotId,
     );
+  }
+
+  /** Append-only edit — creates a new revision that supersedes `:snapshotId`. */
+  @Post(':id/snapshots/:snapshotId/revisions')
+  editSnapshot(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('snapshotId') snapshotId: string,
+    @Body() dto: EditApplicationSnapshotDto,
+  ) {
+    return this.applicationSnapshotsService.edit(
+      user.userId,
+      id,
+      snapshotId,
+      dto,
+    );
+  }
+
+  @Delete(':id/snapshots/:snapshotId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async removeSnapshot(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('snapshotId') snapshotId: string,
+  ) {
+    await this.applicationSnapshotsService.remove(user.userId, id, snapshotId);
   }
 }

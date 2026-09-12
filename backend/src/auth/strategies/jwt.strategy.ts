@@ -26,6 +26,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: secret,
+      // Production hardening (Batch 10) — explicit algorithm pinning. This
+      // app only ever signs with HS256 (see auth.service.ts's issueTokens())
+      // and `secretOrKey` above is a single symmetric secret, not an
+      // asymmetric keypair — pinning `algorithms` here closes the classic
+      // "alg confusion" class of JWT vulnerability outright (a token
+      // crafted with a different `alg` header, e.g. attempting to coerce a
+      // public-key algorithm into treating this secret as a public key, or
+      // `alg: none`) rather than relying on the library's own default
+      // protections against it.
+      algorithms: ['HS256'],
     });
   }
 

@@ -15,6 +15,7 @@ import type { AuthenticatedUser } from '../auth/decorators/current-user.decorato
 import { TasksService } from './tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
+import { ListTasksQueryDto } from './dto/list-tasks-query.dto';
 
 @Controller('tasks')
 export class TasksController {
@@ -28,13 +29,13 @@ export class TasksController {
   @Get()
   findAll(
     @CurrentUser() user: AuthenticatedUser,
-    @Query('journeyId') journeyId?: string,
-    @Query('applicationId') applicationId?: string,
+    @Query() query: ListTasksQueryDto,
   ) {
-    return this.tasksService.findAllForUser(user.userId, {
-      journeyId,
-      applicationId,
-    });
+    return this.tasksService.findAllForUser(
+      user.userId,
+      { journeyId: query.journeyId, applicationId: query.applicationId },
+      query,
+    );
   }
 
   @Get(':id')

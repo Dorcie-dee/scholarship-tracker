@@ -4,6 +4,11 @@ import { SmtpEmailProvider } from './smtp-email.provider';
  * SmtpEmailProvider takes an already-constructed transporter (see the
  * class's doc comment) specifically so it can be unit-tested with a fake
  * one — no real network call, no nodemailer module mocking required.
+ *
+ * `retryDelayMs: 0` in the failure-path tests below — Production hardening
+ * (Batch 11) added a single bounded retry (see the class's doc comment);
+ * passing 0 keeps these tests from costing real wall-clock time while still
+ * exercising the exact same retry-then-fail code path production uses.
  */
 describe('SmtpEmailProvider', () => {
   const params = {
@@ -29,6 +34,7 @@ describe('SmtpEmailProvider', () => {
       text: params.text,
       html: params.html,
     });
+    expect(sendMail).toHaveBeenCalledTimes(1);
   });
 
   it('wraps a provider failure in a safe, generic error — never the raw provider error', async () => {
@@ -41,6 +47,7 @@ describe('SmtpEmailProvider', () => {
     const provider = new SmtpEmailProvider(
       { sendMail },
       'from@example.invalid',
+      0,
     );
 
     await expect(provider.send(params)).rejects.toThrow('Failed to send email');
@@ -62,8 +69,54 @@ describe('SmtpEmailProvider', () => {
     const provider = new SmtpEmailProvider(
       { sendMail },
       'from@example.invalid',
+      0,
     );
 
     await expect(provider.send(sensitiveParams)).rejects.not.toThrow(/482913/);
+  });
+
+  /** Production hardening (Batch 11) — bounded single retry. */
+  describe('retry behavior', () => {
+    it('retries once and succeeds when the first attempt fails but the second succeeds', async () => {
+      const sendMail = jest
+        .fn()
+        .mockRejectedValueOnce(new Error('temporary blip'))
+        .mockResolvedValueOnce({ messageId: 'abc' });
+      const provider = new SmtpEmailProvider(
+        { sendMail },
+        'from@example.invalid',
+        0,
+      );
+
+      await expect(provider.send(params)).resolves.toBeUndefined();
+      expect(sendMail).toHaveBeenCalledTimes(2);
+    });
+
+    it('gives up after exactly one retry (two total attempts), not more', async () => {
+      const sendMail = jest.fn().mockRejectedValue(new Error('still failing'));
+      const provider = new SmtpEmailProvider(
+        { sendMail },
+        'from@example.invalid',
+        0,
+      );
+
+      await expect(provider.send(params)).rejects.toThrow(
+        'Failed to send email',
+      );
+      expect(sendMail).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not retry at all when the first attempt succeeds', async () => {
+      const sendMail = jest.fn().mockResolvedValue({ messageId: 'abc' });
+      const provider = new SmtpEmailProvider(
+        { sendMail },
+        'from@example.invalid',
+        0,
+      );
+
+      await provider.send(params);
+
+      expect(sendMail).toHaveBeenCalledTimes(1);
+    });
   });
 });

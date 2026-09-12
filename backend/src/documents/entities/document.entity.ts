@@ -64,6 +64,24 @@ export class Document extends BaseEntity {
   @Column({ type: 'varchar', length: 1024, name: 'cloudinary_url' })
   cloudinaryUrl: string;
 
+  /**
+   * Production hardening (Batch 6) — Cloudinary's own `resource_type`
+   * ('image' | 'raw' | 'video'), captured exactly as Cloudinary reported it
+   * at upload time (via `resource_type: 'auto'` detection). Required to
+   * generate a correct signed delivery URL or issue a correct delete call
+   * later — both must specify the exact resource type an asset was actually
+   * stored under, and inferring it from `mimeType` risks a mismatch
+   * Cloudinary itself already resolved unambiguously at upload time.
+   * Nullable only for rows written before this column existed.
+   */
+  @Column({
+    type: 'varchar',
+    length: 32,
+    name: 'cloudinary_resource_type',
+    nullable: true,
+  })
+  cloudinaryResourceType: string | null;
+
   @Column({ type: 'varchar', length: 100, nullable: true, name: 'mime_type' })
   mimeType: string | null;
 

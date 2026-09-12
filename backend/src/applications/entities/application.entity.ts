@@ -1,6 +1,7 @@
 import { ApplicationStatus, ApplicationType } from '../../types';
 import {
   Column,
+  DeleteDateColumn,
   Entity,
   Index,
   JoinColumn,
@@ -93,4 +94,38 @@ export class Application extends BaseEntity {
 
   @OneToMany(() => ApplicationSnapshot, (snapshot) => snapshot.application)
   snapshots?: ApplicationSnapshot[];
+
+  /**
+   * Production hardening (Batch 7) — soft-delete, deliberately scoped to
+   * Application ONLY, not a blanket pattern applied to every entity in this
+   * codebase. Application is the one entity in the domain model where an
+   * accidental or reconsidered deletion has real, hard-to-reconstruct cost:
+   * a real Application can carry a submission history worth preserving
+   * through a grace period — Requirements, Tasks, Deadlines, attached
+   * Document versions, and (Track 1 Group D's) point-in-time
+   * ApplicationSnapshots, exactly the "historical accuracy" data this
+   * domain model already treats as significant elsewhere. Everything else
+   * that supports delete (Universities/Programmes/Opportunities catalog
+   * rows, Documents, Tasks, Requirements, Deadlines) stays hard-delete —
+   * those are either shared catalog data with no per-user "undo" need, or
+   * (Documents) already have their own dedicated version-history model
+   * serving the same "don't lose history" goal a different way.
+   *
+   * TypeORM's `@DeleteDateColumn` makes `repository.find()`/`findOne()`
+   * automatically exclude a soft-deleted row (`deletedAt IS NULL`) with no
+   * per-call opt-in — the safer default, since forgetting to add a filter
+   * is the actual production risk this exists to close. Query-builder-based
+   * reads (`ApplicationsService.findAllForUser()`'s keyset pagination) are
+   * NOT covered by that automatic behavior and filter explicitly instead —
+   * see that method.
+   *
+   * A soft-deleted Application is purged (hard-deleted, cascading exactly
+   * as a direct hard delete always did) after
+   * `applications.softDeleteRetentionDays` by `ApplicationPurgeService` —
+   * see docs/decisions.md, "Batch 7 — Application soft-delete". Owner-only
+   * restore (`POST /applications/:id/restore`) clears `deletedAt` while the
+   * row still exists; after purge the application is permanently gone (404).
+   */
+  @DeleteDateColumn({ type: 'timestamptz', name: 'deleted_at' })
+  deletedAt: Date | null;
 }

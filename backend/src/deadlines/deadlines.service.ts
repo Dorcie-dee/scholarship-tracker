@@ -4,7 +4,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
+import { AppConfig } from '../config/configuration';
+import {
+  applyKeysetPagination,
+  buildPaginatedResult,
+  decodeCursor,
+  PaginatedResult,
+  resolvePageSize,
+} from '../common/pagination/cursor';
+import { PaginationQueryDto } from '../common/pagination/pagination-query.dto';
 import { Deadline } from './entities/deadline.entity';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
 import { ApplicationsService } from '../applications/applications.service';
@@ -28,6 +38,7 @@ export class DeadlinesService {
     private readonly applicationsService: ApplicationsService,
     private readonly tasksService: TasksService,
     private readonly requirementsService: RequirementsService,
+    private readonly configService: ConfigService<AppConfig, true>,
   ) {}
 
   /**
@@ -77,6 +88,7 @@ export class DeadlinesService {
     return this.deadlines.save(deadline);
   }
 
+  /** Production hardening (Batch 4) — keyset-paginated, ordered by `(date, id)`. Always at least one of the four link filters is required (unchanged) — the result set is already scoped to one parent, not a platform-wide list, but pagination is applied for consistency and defense against an unusually deadline-heavy parent. */
   async findAll(
     userId: string,
     filters: {
@@ -85,7 +97,8 @@ export class DeadlinesService {
       taskId?: string;
       requirementId?: string;
     },
-  ): Promise<Deadline[]> {
+    query: PaginationQueryDto,
+  ): Promise<PaginatedResult<Deadline>> {
     if (
       !filters.opportunityId &&
       !filters.applicationId &&
@@ -97,21 +110,52 @@ export class DeadlinesService {
       );
     }
     await this.validateAndAuthorizeLinks(userId, filters);
-    return this.deadlines.find({
-      where: {
-        ...(filters.opportunityId
-          ? { opportunityId: filters.opportunityId }
-          : {}),
-        ...(filters.applicationId
-          ? { applicationId: filters.applicationId }
-          : {}),
-        ...(filters.taskId ? { taskId: filters.taskId } : {}),
-        ...(filters.requirementId
-          ? { requirementId: filters.requirementId }
-          : {}),
-      },
-      order: { date: 'ASC' },
+
+    const { defaultPageSize, maxPageSize } = this.configService.get(
+      'pagination',
+      { infer: true },
+    );
+    const limit = resolvePageSize(query.limit, {
+      defaultPageSize,
+      maxPageSize,
     });
+    const direction = query.order === 'desc' ? 'DESC' : 'ASC';
+
+    const qb = this.deadlines.createQueryBuilder('deadline');
+    if (filters.opportunityId) {
+      qb.andWhere('deadline.opportunityId = :opportunityId', {
+        opportunityId: filters.opportunityId,
+      });
+    }
+    if (filters.applicationId) {
+      qb.andWhere('deadline.applicationId = :applicationId', {
+        applicationId: filters.applicationId,
+      });
+    }
+    if (filters.taskId) {
+      qb.andWhere('deadline.taskId = :taskId', { taskId: filters.taskId });
+    }
+    if (filters.requirementId) {
+      qb.andWhere('deadline.requirementId = :requirementId', {
+        requirementId: filters.requirementId,
+      });
+    }
+    applyKeysetPagination(
+      qb,
+      'deadline.date',
+      'deadline.id',
+      direction,
+      query.cursor ? decodeCursor(query.cursor) : undefined,
+      limit,
+    );
+
+    const rows = await qb.getMany();
+    return buildPaginatedResult(
+      rows,
+      limit,
+      (r) => r.date.toISOString(),
+      (r) => r.id,
+    );
   }
 
   private async findEntityOrThrow(id: string): Promise<Deadline> {
