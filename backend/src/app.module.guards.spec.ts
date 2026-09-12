@@ -1,9 +1,10 @@
 import { APP_GUARD } from '@nestjs/core';
 import { MODULE_METADATA } from '@nestjs/common/constants';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AppModule } from './app.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
+import { ProductionThrottlerGuard } from './common/throttler/production-throttler.guard';
 
 /**
  * Track 1 hardening pass, §2.1 — verifies ThrottlerGuard is genuinely
@@ -39,7 +40,7 @@ describe('AppModule — guard wiring', () => {
     expect(match).toBeDefined();
   });
 
-  it('registers RolesGuard and ThrottlerGuard as further, independent global APP_GUARDs (3 total)', () => {
+  it('registers RolesGuard and ProductionThrottlerGuard as further, independent global APP_GUARDs (3 total)', () => {
     const matches = providers.filter(
       (p): p is { provide: unknown; useClass: unknown } =>
         typeof p === 'object' &&
@@ -48,7 +49,9 @@ describe('AppModule — guard wiring', () => {
         p.provide === APP_GUARD,
     );
     expect(matches).toHaveLength(3);
-    expect(matches.some((m) => m.useClass === ThrottlerGuard)).toBe(true);
+    expect(matches.some((m) => m.useClass === ProductionThrottlerGuard)).toBe(
+      true,
+    );
     expect(matches.some((m) => m.useClass === RolesGuard)).toBe(true);
   });
 
