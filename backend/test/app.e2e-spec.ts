@@ -1,37 +1,33 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { App } from 'supertest/types';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/bootstrap';
+import { bootstrapTestApp, TestApp } from './http-integration/test-app';
 
-// Skipped: these tests need a real `scholarship_os_test` database to connect
-// to (see test/setup-env.ts), which doesn't exist yet on the Postgres server
-// `.env` currently points at (Neon). Create that database, then remove
-// `.skip` here to turn these back on.
-describe.skip('AppController (e2e)', () => {
-  let app: INestApplication<App>;
+/**
+ * Final verification pass — un-skipped. Previously blocked on
+ * `scholarship_os_test` not existing on whatever server `.env` pointed at
+ * (Neon); `test/setup-env.ts` now hardcodes local Postgres (see its own doc
+ * comment), so this runs safely regardless of `.env`'s content. Reuses
+ * `bootstrapTestApp()` (the same, already-audited real-app bootstrap the
+ * newer `test/http-integration/*.http-integration-spec.ts` layer uses)
+ * rather than re-implementing app construction here — one safe bootstrap
+ * path, not two.
+ */
+describe('AppController (e2e)', () => {
+  let testApp: TestApp;
 
   beforeEach(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
+    testApp = await bootstrapTestApp();
+  });
 
-    app = moduleFixture.createNestApplication();
-    configureApp(app);
-    await app.init();
+  afterEach(async () => {
+    await testApp.app.close();
   });
 
   it('/api/health (GET) is public and reports ok', () => {
-    return request(app.getHttpServer())
+    return request(testApp.app.getHttpServer())
       .get('/api/health')
       .expect(200)
       .expect((res) => {
         expect(res.body).toEqual(expect.objectContaining({ status: 'ok' }));
       });
-  });
-
-  afterEach(async () => {
-    await app.close();
   });
 });
