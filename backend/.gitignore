@@ -26,3 +26,5 @@ yarn-error.log*
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+phase-1o5.txt
