@@ -1,11 +1,22 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import { RequirementStatus } from '../types';
+import { AppConfig } from '../config/configuration';
+import {
+  applyKeysetPagination,
+  buildPaginatedResult,
+  decodeCursor,
+  PaginatedResult,
+  resolvePageSize,
+} from '../common/pagination/cursor';
+import { PaginationQueryDto } from '../common/pagination/pagination-query.dto';
 import { Application } from './entities/application.entity';
 import { Requirement } from '../requirements/entities/requirement.entity';
 import { JourneysService } from '../journeys/journeys.service';
@@ -28,6 +39,7 @@ export class ApplicationsService {
     private readonly requirements: Repository<Requirement>,
     private readonly journeysService: JourneysService,
     private readonly opportunitiesService: OpportunitiesService,
+    private readonly configService: ConfigService<AppConfig, true>,
   ) {}
 
   /**
@@ -97,15 +109,50 @@ export class ApplicationsService {
     });
   }
 
-  findAllForUser(userId: string, journeyId?: string): Promise<Application[]> {
-    return this.applications.find({
-      where: {
-        journey: { userId },
-        ...(journeyId ? { journeyId } : {}),
-      },
-      relations: { journey: true },
-      order: { createdAt: 'DESC' },
+  /** Production hardening (Batch 4) — keyset-paginated, ordered by `(createdAt, id)` DESC. Still joined through `journey` to scope by `userId` first — pagination never loosens ownership. */
+  async findAllForUser(
+    userId: string,
+    journeyId: string | undefined,
+    query: PaginationQueryDto,
+  ): Promise<PaginatedResult<Application>> {
+    const { defaultPageSize, maxPageSize } = this.configService.get(
+      'pagination',
+      { infer: true },
+    );
+    const limit = resolvePageSize(query.limit, {
+      defaultPageSize,
+      maxPageSize,
     });
+    const direction = query.order === 'asc' ? 'ASC' : 'DESC';
+
+    const qb = this.applications
+      .createQueryBuilder('application')
+      .innerJoin('application.journey', 'journey')
+      .andWhere('journey.userId = :userId', { userId })
+      // Production hardening (Batch 7) — query-builder reads aren't covered
+      // by @DeleteDateColumn's automatic exclusion (that only applies to
+      // repository.find()/findOne()); filtered explicitly here instead. See
+      // application.entity.ts's doc comment on `deletedAt`.
+      .andWhere('application.deletedAt IS NULL');
+    if (journeyId) {
+      qb.andWhere('application.journeyId = :journeyId', { journeyId });
+    }
+    applyKeysetPagination(
+      qb,
+      'application.createdAt',
+      'application.id',
+      direction,
+      query.cursor ? decodeCursor(query.cursor) : undefined,
+      limit,
+    );
+
+    const rows = await qb.getMany();
+    return buildPaginatedResult(
+      rows,
+      limit,
+      (r) => r.createdAt.toISOString(),
+      (r) => r.id,
+    );
   }
 
   private async findWithJourneyOrThrow(id: string): Promise<Application> {
@@ -167,8 +214,41 @@ export class ApplicationsService {
     return this.applications.save(application);
   }
 
+  /**
+   * Production hardening (Batch 7) — soft-delete, not a hard delete. See
+   * application.entity.ts's doc comment on `deletedAt` for why this entity
+   * specifically. `softDelete()` sets `deletedAt`; the row (and everything
+   * that cascades from it) is only permanently removed later, by
+   * `ApplicationPurgeService`, once the retention window has passed.
+   * Owner-only restore is available via `restore()` while the row still exists.
+   */
   async remove(id: string, userId: string): Promise<void> {
     await this.findOwnedOrThrow(id, userId);
-    await this.applications.delete(id);
+    await this.applications.softDelete(id);
+  }
+
+  /**
+   * Owner-only restore of a soft-deleted Application. Children were never
+   * soft-deleted independently — clearing `deletedAt` re-exposes them through
+   * existing visibility filters. After permanent purge the row is gone → 404.
+   */
+  async restore(id: string, userId: string): Promise<Application> {
+    const application = await this.applications.findOne({
+      where: { id },
+      relations: { journey: true },
+      withDeleted: true,
+    });
+    if (!application) {
+      throw new NotFoundException('Application not found');
+    }
+    // Same 404 convention as live lookups — do not reveal another user's deleted row.
+    assertOwnership(application.journey.userId, userId);
+
+    if (application.deletedAt === null) {
+      throw new ConflictException('Application is not deleted');
+    }
+
+    await this.applications.recover(application);
+    return this.findOwnedOrThrow(id, userId);
   }
 }
