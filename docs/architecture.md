@@ -4,7 +4,7 @@
 
 | Layer    | Choice                                                                 |
 | -------- | ----------------------------------------------------------------------- |
-| Backend  | NestJS 11, TypeORM 0.3 + PostgreSQL, Passport-JWT, Cloudinary SDK       |
+| Backend  | NestJS 11, TypeORM 0.3 + PostgreSQL, Passport-JWT, Cloudinary SDK, Redis (`ioredis`, optional — see "Production hardening infrastructure" below) |
 | Frontend | Next.js 16 (App Router, Turbopack), React 19.2, Ant Design 5, TanStack Query 5, Tailwind CSS 4 |
 | Repo     | Two independent projects side by side — see "Independent repos" below  |
 
@@ -149,3 +149,22 @@ just documented) — see `decisions.md`, "Advisory lock: verified against real P
   on a route (or no `@Roles()` at all, the default — no restriction) works the same opt-in way
   `@Public()` opts a route OUT of authentication. Minimal two-role (`USER`/`ADMIN`) foundation, not a
   full permissions system — see `decisions.md`.
+
+## Production hardening infrastructure
+
+Added during the consolidated production-hardening pass — see `decisions.md`'s "Production Hardening
+(Consolidated Implementation)" section for the full reasoning behind each:
+
+- **Redis** (`common/redis/redis.module.ts`, `@Global()`) — optional (`REDIS_URL`): backs the
+  distributed, cross-instance rate limiter (`RedisThrottlerStorage`) and `LoginGuardService`'s
+  account-scoped login throttle. Absent, both fall back to a per-process, in-memory equivalent — the
+  app degrades, it doesn't fail to start.
+- **`StatementTimeoutProvider`** — attaches a real, verified-working `SET statement_timeout` to every
+  new DB connection (see `decisions.md`, "Batch 1"); a query-level backstop against a pool-starving
+  runaway query.
+- **`AuthCleanupService`** — hourly cron purging expired/revoked auth artifacts (refresh sessions,
+  OTPs, reset tokens) past a retention window.
+- **`GET /health`** (liveness) vs. **`GET /health/ready`** (readiness, real DB check) — see
+  `api-reference.md`.
+- **Cursor pagination** (`common/pagination/cursor.ts`) — one consistent keyset-pagination contract
+  used by every potentially-large list endpoint; see `decisions.md`, "Batch 4".
