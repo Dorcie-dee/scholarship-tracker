@@ -13,12 +13,18 @@ import {
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { RequirementsService } from './requirements.service';
+import { RequirementAiService } from './ai/requirement-ai.service';
 import { CreateRequirementDto } from './dto/create-requirement.dto';
 import { UpdateRequirementDto } from './dto/update-requirement.dto';
+import { ListRequirementsQueryDto } from './dto/list-requirements-query.dto';
+import { StrictRateLimit } from '../common/decorators/strict-rate-limit.decorator';
 
 @Controller('requirements')
 export class RequirementsController {
-  constructor(private readonly requirementsService: RequirementsService) {}
+  constructor(
+    private readonly requirementsService: RequirementsService,
+    private readonly requirementAiService: RequirementAiService,
+  ) {}
 
   @Post()
   create(
@@ -31,13 +37,16 @@ export class RequirementsController {
   @Get()
   findAll(
     @CurrentUser() user: AuthenticatedUser,
-    @Query('opportunityId') opportunityId?: string,
-    @Query('applicationId') applicationId?: string,
+    @Query() query: ListRequirementsQueryDto,
   ) {
-    return this.requirementsService.findAll(user.userId, {
-      opportunityId,
-      applicationId,
-    });
+    return this.requirementsService.findAll(
+      user.userId,
+      {
+        opportunityId: query.opportunityId,
+        applicationId: query.applicationId,
+      },
+      query,
+    );
   }
 
   @Get(':id')
@@ -61,5 +70,22 @@ export class RequirementsController {
     @Param('id') id: string,
   ) {
     await this.requirementsService.remove(id, user.userId);
+  }
+
+  /** AI suggests only — never mutates authoritative status. */
+  @Post(':id/ai-suggestion')
+  @StrictRateLimit()
+  suggestAi(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.requirementAiService.suggest(user.userId, id);
+  }
+
+  @Post(':id/ai-suggestion/confirm')
+  confirmAi(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.requirementAiService.confirm(user.userId, id);
+  }
+
+  @Post(':id/ai-suggestion/reject')
+  rejectAi(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.requirementAiService.reject(user.userId, id);
   }
 }

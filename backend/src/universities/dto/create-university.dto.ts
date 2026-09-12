@@ -7,6 +7,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { trim } from '../../common/validators/trim.transform';
+import { FREE_TEXT_MAX_LENGTH } from '../../common/validators/text-limits';
 
 export class CreateUniversityDto {
   @Transform(trim)
@@ -27,5 +28,6 @@ export class CreateUniversityDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(FREE_TEXT_MAX_LENGTH)
   notes?: string;
 }

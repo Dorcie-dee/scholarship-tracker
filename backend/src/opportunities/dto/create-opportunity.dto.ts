@@ -12,6 +12,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { trim } from '../../common/validators/trim.transform';
+import { FREE_TEXT_MAX_LENGTH } from '../../common/validators/text-limits';
 
 export class CreateOpportunityDto {
   @Transform(trim)
@@ -70,6 +71,7 @@ export class CreateOpportunityDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(FREE_TEXT_MAX_LENGTH)
   eligibilitySummary?: string;
 
   @IsOptional()
@@ -90,6 +92,18 @@ export class CreateOpportunityDto {
   @IsUUID()
   programmeId?: string;
 
+  /**
+   * Production hardening (Batch 8) — deliberately left without a shape/size
+   * bound beyond `@IsObject()` and the global request body limit (256kb,
+   * see bootstrap.ts). Unlike every other free-text field in this DTO
+   * (now `@MaxLength`-bounded — see text-limits.ts), this route is
+   * ADMIN-gated (see decisions.md, "RBAC dependency"): the abuse surface a
+   * per-field size cap exists to close — an arbitrary *authenticated user*
+   * writing unbounded data — doesn't apply the same way to a caller who
+   * already holds elevated trust. Adding a bespoke JSON-size validator here
+   * with no concrete abuse case behind it would be exactly the unnecessary
+   * complexity this phase's own instructions warn against.
+   */
   @IsOptional()
   @IsObject()
   metadata?: Record<string, unknown>;

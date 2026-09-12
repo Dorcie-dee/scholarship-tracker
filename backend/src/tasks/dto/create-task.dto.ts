@@ -8,6 +8,7 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
+import { FREE_TEXT_MAX_LENGTH } from '../../common/validators/text-limits';
 
 export class CreateTaskDto {
   /**
@@ -24,6 +25,7 @@ export class CreateTaskDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(FREE_TEXT_MAX_LENGTH)
   description?: string;
 
   @IsOptional()

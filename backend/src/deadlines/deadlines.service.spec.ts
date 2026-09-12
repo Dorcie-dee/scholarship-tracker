@@ -53,6 +53,9 @@ describe('DeadlinesService — update() only re-validates changed links', () => 
       applicationsService,
       tasksService,
       requirementsService,
+      {
+        get: jest.fn(() => ({ defaultPageSize: 25, maxPageSize: 100 })),
+      } as any,
     );
   });
 
@@ -144,6 +147,9 @@ describe('DeadlinesService — create() validates independent links concurrently
       applicationsService as any,
       tasksService as any,
       requirementsService as any,
+      {
+        get: jest.fn(() => ({ defaultPageSize: 25, maxPageSize: 100 })),
+      } as any,
     );
 
     await service.create('user-1', {
@@ -155,5 +161,89 @@ describe('DeadlinesService — create() validates independent links concurrently
 
     expect(applicationsService.findOwnedOrThrow).toHaveBeenCalledTimes(1);
     expect(tasksService.findOwnedOrThrow).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** Production hardening (Batch 4) — findAll() is keyset-paginated, ordered by (date, id). */
+describe('DeadlinesService — findAll pagination (Batch 4)', () => {
+  it('orders by date ascending and paginates via cursor', async () => {
+    const rows = [
+      {
+        id: 'd-1',
+        applicationId: 'app-1',
+        date: new Date('2027-03-01T00:00:00Z'),
+      },
+      {
+        id: 'd-2',
+        applicationId: 'app-1',
+        date: new Date('2027-01-01T00:00:00Z'),
+      },
+      {
+        id: 'd-3',
+        applicationId: 'app-1',
+        date: new Date('2027-02-01T00:00:00Z'),
+      },
+    ];
+    const qb: any = {
+      andWhere: jest.fn((_sql: string, params: any) => {
+        qb.__where = { ...(qb.__where ?? {}), ...params };
+        return qb;
+      }),
+      orderBy: jest.fn(() => qb),
+      addOrderBy: jest.fn(() => qb),
+      take: jest.fn(() => qb),
+      getMany: jest.fn(async () => {
+        let result = [...rows].sort(
+          (a, b) => a.date.getTime() - b.date.getTime(),
+        );
+        if (qb.__where?.cursorSortValue !== undefined) {
+          const cursorTime = new Date(qb.__where.cursorSortValue).getTime();
+          result = result.filter((r) => r.date.getTime() > cursorTime);
+        }
+        return result;
+      }),
+    };
+    const deadlines = { createQueryBuilder: jest.fn(() => qb) };
+    const applicationsService = {
+      findOwnedOrThrow: jest.fn(async (id: string) => ({
+        id,
+        journeyId: 'j-1',
+      })),
+    };
+    const service = new DeadlinesService(
+      deadlines as any,
+      { findOneOrThrow: jest.fn() } as any,
+      applicationsService as any,
+      { findOwnedOrThrow: jest.fn() } as any,
+      { findOneAccessible: jest.fn() } as any,
+      {
+        get: jest.fn(() => ({ defaultPageSize: 25, maxPageSize: 100 })),
+      } as any,
+    );
+
+    const result = await service.findAll(
+      'user-1',
+      { applicationId: 'app-1' },
+      {},
+    );
+
+    expect(result.items.map((r: any) => r.id)).toEqual(['d-2', 'd-3', 'd-1']);
+  });
+
+  it('rejects when no link filter is provided at all', async () => {
+    const service = new DeadlinesService(
+      { createQueryBuilder: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {
+        get: jest.fn(() => ({ defaultPageSize: 25, maxPageSize: 100 })),
+      } as any,
+    );
+
+    await expect(service.findAll('user-1', {}, {})).rejects.toThrow(
+      'Provide at least one of',
+    );
   });
 });

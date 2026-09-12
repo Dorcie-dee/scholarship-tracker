@@ -6,6 +6,7 @@ import {
   IsUUID,
   MaxLength,
 } from 'class-validator';
+import { FREE_TEXT_MAX_LENGTH } from '../../common/validators/text-limits';
 
 export class CreateJourneyDto {
   @IsString()
@@ -14,6 +15,7 @@ export class CreateJourneyDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(FREE_TEXT_MAX_LENGTH)
   goal?: string;
 
   @IsOptional()
@@ -30,5 +32,6 @@ export class CreateJourneyDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(FREE_TEXT_MAX_LENGTH)
   notes?: string;
 }

@@ -19,8 +19,19 @@ import { Deadline } from '../../deadlines/entities/deadline.entity';
  * Deliberately does not try to model every field every scholarship website
  * might publish — `metadata` is the escape hatch for anything not modeled
  * explicitly, per the spec's "Other" category.
+ *
+ * Production hardening (Batch 18, final scalability review) —
+ * `(created_at, id)` composite index, same reasoning as `University`'s own
+ * (see its doc comment): `OpportunitiesService.findAll()`'s default keyset
+ * pagination sorts on exactly this pair, and Opportunity is this whole
+ * product's central, shared, unscoped, and most likely to actually grow
+ * large catalog table — the one place "database size grows 10x/100x"
+ * concretely means "the opportunity catalog grows," not merely "the user
+ * count grows" (which the owner-scoped tables already tolerate via their
+ * existing FK indexes, bounding any one query to one user's own rows).
  */
 @Entity('opportunities')
+@Index(['createdAt', 'id'])
 export class Opportunity extends BaseEntity {
   @Column({ type: 'varchar', length: 255 })
   title: string;

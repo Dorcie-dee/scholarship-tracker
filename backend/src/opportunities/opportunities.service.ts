@@ -4,21 +4,22 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, Repository } from 'typeorm';
-import { OpportunityType, StudyLevel } from '../types';
+import { ConfigService } from '@nestjs/config';
+import { Repository } from 'typeorm';
+import { AppConfig } from '../config/configuration';
+import {
+  applyKeysetPagination,
+  buildPaginatedResult,
+  decodeCursor,
+  PaginatedResult,
+  resolvePageSize,
+} from '../common/pagination/cursor';
 import { Opportunity } from './entities/opportunity.entity';
 import { UniversitiesService } from '../universities/universities.service';
 import { ProgrammesService } from '../programmes/programmes.service';
 import { CreateOpportunityDto } from './dto/create-opportunity.dto';
 import { UpdateOpportunityDto } from './dto/update-opportunity.dto';
-
-export interface OpportunityFilters {
-  studyLevel?: StudyLevel;
-  country?: string;
-  opportunityType?: OpportunityType;
-  universityId?: string;
-  programmeId?: string;
-}
+import { ListOpportunitiesQueryDto } from './dto/list-opportunities-query.dto';
 
 @Injectable()
 export class OpportunitiesService {
@@ -27,6 +28,7 @@ export class OpportunitiesService {
     private readonly opportunities: Repository<Opportunity>,
     private readonly universitiesService: UniversitiesService,
     private readonly programmesService: ProgrammesService,
+    private readonly configService: ConfigService<AppConfig, true>,
   ) {}
 
   /**
@@ -104,19 +106,66 @@ export class OpportunitiesService {
    * established between findOneOrThrow/findOneWithDetailsOrThrow for the
    * single-row case, now applied consistently to the list case too.
    */
-  findAll(filters: OpportunityFilters): Promise<Opportunity[]> {
-    const where: FindOptionsWhere<Opportunity> = {};
-    if (filters.studyLevel) where.studyLevel = filters.studyLevel;
-    if (filters.country) where.country = filters.country;
-    if (filters.opportunityType)
-      where.opportunityType = filters.opportunityType;
-    if (filters.universityId) where.universityId = filters.universityId;
-    if (filters.programmeId) where.programmeId = filters.programmeId;
-
-    return this.opportunities.find({
-      where,
-      order: { createdAt: 'DESC' },
+  /**
+   * Production hardening (Batch 4) — keyset-paginated, ordered by
+   * `(createdAt, id)` DESC (newest first, matching the original order).
+   * Previously returned the entire filtered result set unconditionally.
+   */
+  async findAll(
+    query: ListOpportunitiesQueryDto,
+  ): Promise<PaginatedResult<Opportunity>> {
+    const { defaultPageSize, maxPageSize } = this.configService.get(
+      'pagination',
+      { infer: true },
+    );
+    const limit = resolvePageSize(query.limit, {
+      defaultPageSize,
+      maxPageSize,
     });
+    const direction = query.order === 'asc' ? 'ASC' : 'DESC';
+
+    const qb = this.opportunities.createQueryBuilder('opportunity');
+    if (query.studyLevel) {
+      qb.andWhere('opportunity.studyLevel = :studyLevel', {
+        studyLevel: query.studyLevel,
+      });
+    }
+    if (query.country) {
+      qb.andWhere('opportunity.country = :country', {
+        country: query.country,
+      });
+    }
+    if (query.opportunityType) {
+      qb.andWhere('opportunity.opportunityType = :opportunityType', {
+        opportunityType: query.opportunityType,
+      });
+    }
+    if (query.universityId) {
+      qb.andWhere('opportunity.universityId = :universityId', {
+        universityId: query.universityId,
+      });
+    }
+    if (query.programmeId) {
+      qb.andWhere('opportunity.programmeId = :programmeId', {
+        programmeId: query.programmeId,
+      });
+    }
+    applyKeysetPagination(
+      qb,
+      'opportunity.createdAt',
+      'opportunity.id',
+      direction,
+      query.cursor ? decodeCursor(query.cursor) : undefined,
+      limit,
+    );
+
+    const rows = await qb.getMany();
+    return buildPaginatedResult(
+      rows,
+      limit,
+      (r) => r.createdAt.toISOString(),
+      (r) => r.id,
+    );
   }
 
   /**

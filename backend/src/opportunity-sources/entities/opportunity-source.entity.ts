@@ -1,4 +1,8 @@
-import { OpportunitySourceType, SourceAuthorityLevel } from '../../types';
+import {
+  ContentOrigin,
+  OpportunitySourceType,
+  SourceAuthorityLevel,
+} from '../../types';
 import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { Opportunity } from '../../opportunities/entities/opportunity.entity';
@@ -57,4 +61,17 @@ export class OpportunitySource extends BaseEntity {
 
   @Column({ type: 'text', nullable: true })
   notes: string | null;
+
+  /**
+   * Whether `extractedContent` / auto-filled `sourceName` came from the user
+   * or from the server-side URL fetcher. Defaults to manual; set to fetched
+   * only when the fetcher actually supplied content.
+   */
+  @Column({
+    type: 'enum',
+    enum: ContentOrigin,
+    name: 'content_origin',
+    default: ContentOrigin.MANUAL,
+  })
+  contentOrigin: ContentOrigin;
 }

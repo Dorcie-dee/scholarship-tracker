@@ -1,5 +1,6 @@
 import { OpportunitySourceType, SourceAuthorityLevel } from '../../types';
 import {
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsOptional,
@@ -8,6 +9,10 @@ import {
   IsUrl,
   MaxLength,
 } from 'class-validator';
+import {
+  EXCERPT_MAX_LENGTH,
+  FREE_TEXT_MAX_LENGTH,
+} from '../../common/validators/text-limits';
 
 export class CreateOpportunitySourceDto {
   @IsUUID()
@@ -38,6 +43,7 @@ export class CreateOpportunitySourceDto {
   /** The relevant excerpt used at capture time — not a full page archive. */
   @IsOptional()
   @IsString()
+  @MaxLength(EXCERPT_MAX_LENGTH)
   extractedContent?: string;
 
   @IsOptional()
@@ -46,5 +52,14 @@ export class CreateOpportunitySourceDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(FREE_TEXT_MAX_LENGTH)
   notes?: string;
+
+  /**
+   * When true and `sourceUrl` is set, the server fetches the page (SSRF-safe)
+   * and fills `extractedContent` / `sourceName` when those were left empty.
+   */
+  @IsOptional()
+  @IsBoolean()
+  autoFetch?: boolean;
 }

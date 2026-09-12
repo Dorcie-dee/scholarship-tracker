@@ -4,7 +4,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
+import { AppConfig } from '../config/configuration';
+import {
+  applyKeysetPagination,
+  buildPaginatedResult,
+  decodeCursor,
+  PaginatedResult,
+  resolvePageSize,
+} from '../common/pagination/cursor';
+import { PaginationQueryDto } from '../common/pagination/pagination-query.dto';
 import { Requirement } from './entities/requirement.entity';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
 import { ApplicationsService } from '../applications/applications.service';
@@ -24,6 +34,7 @@ export class RequirementsService {
     private readonly requirements: Repository<Requirement>,
     private readonly opportunitiesService: OpportunitiesService,
     private readonly applicationsService: ApplicationsService,
+    private readonly configService: ConfigService<AppConfig, true>,
   ) {}
 
   async create(
@@ -47,10 +58,12 @@ export class RequirementsService {
     return this.requirements.save(this.requirements.create(dto));
   }
 
+  /** Production hardening (Batch 4) — keyset-paginated, ordered by `(createdAt, id)`. Always scoped to at least one parent (unchanged) — see DeadlinesService.findAll()'s analogous comment on why pagination still applies. */
   async findAll(
     userId: string,
     filters: { opportunityId?: string; applicationId?: string },
-  ): Promise<Requirement[]> {
+    query: PaginationQueryDto,
+  ): Promise<PaginatedResult<Requirement>> {
     if (!filters.opportunityId && !filters.applicationId) {
       throw new BadRequestException(
         'Provide opportunityId and/or applicationId to list requirements',
@@ -62,17 +75,44 @@ export class RequirementsService {
         userId,
       );
     }
-    return this.requirements.find({
-      where: {
-        ...(filters.opportunityId
-          ? { opportunityId: filters.opportunityId }
-          : {}),
-        ...(filters.applicationId
-          ? { applicationId: filters.applicationId }
-          : {}),
-      },
-      order: { createdAt: 'ASC' },
+
+    const { defaultPageSize, maxPageSize } = this.configService.get(
+      'pagination',
+      { infer: true },
+    );
+    const limit = resolvePageSize(query.limit, {
+      defaultPageSize,
+      maxPageSize,
     });
+    const direction = query.order === 'desc' ? 'DESC' : 'ASC';
+
+    const qb = this.requirements.createQueryBuilder('requirement');
+    if (filters.opportunityId) {
+      qb.andWhere('requirement.opportunityId = :opportunityId', {
+        opportunityId: filters.opportunityId,
+      });
+    }
+    if (filters.applicationId) {
+      qb.andWhere('requirement.applicationId = :applicationId', {
+        applicationId: filters.applicationId,
+      });
+    }
+    applyKeysetPagination(
+      qb,
+      'requirement.createdAt',
+      'requirement.id',
+      direction,
+      query.cursor ? decodeCursor(query.cursor) : undefined,
+      limit,
+    );
+
+    const rows = await qb.getMany();
+    return buildPaginatedResult(
+      rows,
+      limit,
+      (r) => r.createdAt.toISOString(),
+      (r) => r.id,
+    );
   }
 
   private async findEntityOrThrow(id: string): Promise<Requirement> {

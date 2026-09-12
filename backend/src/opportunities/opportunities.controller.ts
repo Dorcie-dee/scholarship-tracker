@@ -10,11 +10,12 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { OpportunityType, StudyLevel, UserRole } from '../types';
+import { UserRole } from '../types';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { OpportunitiesService } from './opportunities.service';
 import { CreateOpportunityDto } from './dto/create-opportunity.dto';
 import { UpdateOpportunityDto } from './dto/update-opportunity.dto';
+import { ListOpportunitiesQueryDto } from './dto/list-opportunities-query.dto';
 
 /** Same read-open/mutation-ADMIN-only split as UniversitiesController — see its doc comment. */
 @Controller('opportunities')
@@ -28,20 +29,8 @@ export class OpportunitiesController {
   }
 
   @Get()
-  findAll(
-    @Query('studyLevel') studyLevel?: StudyLevel,
-    @Query('country') country?: string,
-    @Query('opportunityType') opportunityType?: OpportunityType,
-    @Query('universityId') universityId?: string,
-    @Query('programmeId') programmeId?: string,
-  ) {
-    return this.opportunitiesService.findAll({
-      studyLevel,
-      country,
-      opportunityType,
-      universityId,
-      programmeId,
-    });
+  findAll(@Query() query: ListOpportunitiesQueryDto) {
+    return this.opportunitiesService.findAll(query);
   }
 
   @Get(':id')

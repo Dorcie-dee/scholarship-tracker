@@ -15,6 +15,7 @@ import type { AuthenticatedUser } from '../auth/decorators/current-user.decorato
 import { DeadlinesService } from './deadlines.service';
 import { CreateDeadlineDto } from './dto/create-deadline.dto';
 import { UpdateDeadlineDto } from './dto/update-deadline.dto';
+import { ListDeadlinesQueryDto } from './dto/list-deadlines-query.dto';
 
 @Controller('deadlines')
 export class DeadlinesController {
@@ -31,17 +32,18 @@ export class DeadlinesController {
   @Get()
   findAll(
     @CurrentUser() user: AuthenticatedUser,
-    @Query('opportunityId') opportunityId?: string,
-    @Query('applicationId') applicationId?: string,
-    @Query('taskId') taskId?: string,
-    @Query('requirementId') requirementId?: string,
+    @Query() query: ListDeadlinesQueryDto,
   ) {
-    return this.deadlinesService.findAll(user.userId, {
-      opportunityId,
-      applicationId,
-      taskId,
-      requirementId,
-    });
+    return this.deadlinesService.findAll(
+      user.userId,
+      {
+        opportunityId: query.opportunityId,
+        applicationId: query.applicationId,
+        taskId: query.taskId,
+        requirementId: query.requirementId,
+      },
+      query,
+    );
   }
 
   @Get(':id')

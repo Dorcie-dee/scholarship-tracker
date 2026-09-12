@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { FindOperator } from 'typeorm';
 import { DocumentType } from '../types';
 import { DocumentsService } from './documents.service';
@@ -97,7 +97,11 @@ describe('DocumentsService', () => {
       // uploadNewVersion() only ever reads once, up front.
       createQueryBuilder: jest.fn(() => {
         let targetId: string | undefined;
-        const builder = {
+        const builder: {
+          setLock: jest.Mock;
+          where: jest.Mock;
+          getOne: jest.Mock;
+        } = {
           setLock: jest.fn(() => builder),
           where: jest.fn((_condition: string, params: { id: string }) => {
             targetId = params.id;
@@ -111,16 +115,65 @@ describe('DocumentsService', () => {
       }),
     });
 
+    // Separate from the scoped-manager's createQueryBuilder above (used only
+    // inside a transaction, for the row-lock) — this is the top-level
+    // repository's own createQueryBuilder(), used by findAllCurrentForUser()'s
+    // keyset pagination (.andWhere().orderBy().addOrderBy().take().getMany()).
+    const makeListQueryBuilder = () => {
+      const whereParams: Record<string, unknown> = {};
+      let limit = Infinity;
+      const builder: any = {
+        andWhere: jest.fn((_sql: string, params: any) => {
+          Object.assign(whereParams, params);
+          return builder;
+        }),
+        orderBy: jest.fn(() => builder),
+        addOrderBy: jest.fn(() => builder),
+        take: jest.fn((n: number) => {
+          limit = n;
+          return builder;
+        }),
+        getMany: jest.fn(async () => {
+          let result = [...rows.values()].filter(
+            (r) => r.ownerId === whereParams.ownerId && r.isCurrent === true,
+          );
+          result.sort(
+            (a, b) =>
+              b.createdAt.getTime() - a.createdAt.getTime() ||
+              b.id.localeCompare(a.id),
+          );
+          if (whereParams.cursorSortValue !== undefined) {
+            const cursorTime = new Date(
+              whereParams.cursorSortValue as string,
+            ).getTime();
+            result = result.filter(
+              (r) =>
+                r.createdAt.getTime() < cursorTime ||
+                (r.createdAt.getTime() === cursorTime &&
+                  r.id < (whereParams.cursorId as string)),
+            );
+          }
+          return result.slice(0, limit);
+        }),
+      };
+      return builder;
+    };
+
     documents = {
       create: jest.fn((partial: any) => ({ ...partial })),
       save: jest.fn(async (row: any) => {
-        const withId = { id: row.id ?? `doc-${nextId++}`, ...row };
+        const withId = {
+          id: row.id ?? `doc-${nextId++}`,
+          createdAt: row.createdAt ?? new Date(),
+          ...row,
+        };
         rows.set(withId.id, withId);
         return withId;
       }),
       findOne: jest.fn(async ({ where }: any) => {
         return [...rows.values()].find((row) => matches(row, where)) ?? null;
       }),
+      createQueryBuilder: jest.fn(() => makeListQueryBuilder()),
       find: jest.fn(async ({ where }: any) => {
         return [...rows.values()].filter((row) => matches(row, where));
       }),
@@ -167,12 +220,24 @@ describe('DocumentsService', () => {
         resourceType: 'raw',
       })),
       deleteByPublicId: jest.fn(),
+      getSignedDeliveryUrl: jest.fn(
+        (publicId: string, resourceType: string) =>
+          `https://res.cloudinary.invalid/${resourceType}/authenticated/${publicId}?signed=1`,
+      ),
     };
 
     service = new DocumentsService(
       documents,
       applicationDocuments,
       cloudinaryService,
+      {
+        get: jest.fn((key: string) => {
+          if (key === 'documents') {
+            return { signedUrlTtlSeconds: 300 };
+          }
+          return { defaultPageSize: 25, maxPageSize: 100 };
+        }),
+      } as any,
     );
   });
 
@@ -221,10 +286,10 @@ describe('DocumentsService', () => {
       const v1 = await service.uploadNew(ownerId, { title: 'CV' }, fakeFile());
       await service.uploadNewVersion(ownerId, v1.id, fakeFile(), {});
 
-      const current = await service.findAllCurrentForUser(ownerId);
+      const current = await service.findAllCurrentForUser(ownerId, {});
 
-      expect(current).toHaveLength(1);
-      expect(current[0].version).toBe(2);
+      expect(current.items).toHaveLength(1);
+      expect(current.items[0].version).toBe(2);
     });
 
     it('findVersionHistory returns the full chain oldest-first', async () => {
@@ -275,16 +340,30 @@ describe('DocumentsService', () => {
       ).toBe(2);
     });
 
-    it('rejects uploading a new version onto a document owned by a different user', async () => {
+    it('rejects uploading a new version onto a document owned by a different user, as a 404 (Track 1 Group E)', async () => {
       const v1 = await service.uploadNew(
         'owner-a',
         { title: 'CV' },
         fakeFile(),
       );
 
+      // A foreign-owned document must respond exactly like one that doesn't
+      // exist — NotFoundException (404), not ForbiddenException (403). See
+      // common/utils/ownership.ts's doc comment.
       await expect(
         service.uploadNewVersion('owner-b', v1.id, fakeFile(), {}),
-      ).rejects.toThrow(ForbiddenException);
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('a genuinely nonexistent document 404s identically to a foreign-owned one (Track 1 Group E)', async () => {
+      await expect(
+        service.uploadNewVersion(
+          ownerId,
+          'document-does-not-exist',
+          fakeFile(),
+          {},
+        ),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('uploadNewVersion produces the same end state as before now that it runs inside a transaction', async () => {
@@ -378,6 +457,7 @@ describe('DocumentsService', () => {
       expect(await documents.findOne({ where: { id: v1.id } })).toBeNull();
       expect(cloudinaryService.deleteByPublicId).toHaveBeenCalledWith(
         v1.cloudinaryPublicId,
+        'raw',
       );
     });
 
@@ -430,9 +510,9 @@ describe('DocumentsService', () => {
       expect(reloadedV1.isCurrent).toBe(true);
       expect(await documents.findOne({ where: { id: v2.id } })).toBeNull();
 
-      const current = await service.findAllCurrentForUser(ownerId);
-      expect(current).toHaveLength(1);
-      expect(current[0].id).toBe(v1.id);
+      const current = await service.findAllCurrentForUser(ownerId, {});
+      expect(current.items).toHaveLength(1);
+      expect(current.items[0].id).toBe(v1.id);
     });
 
     it('deleting the sole version of a document family removes it entirely, with no misleading empty-current state', async () => {
@@ -440,12 +520,12 @@ describe('DocumentsService', () => {
 
       await service.remove(v1.id, ownerId);
 
-      const current = await service.findAllCurrentForUser(ownerId);
-      expect(current).toHaveLength(0);
+      const current = await service.findAllCurrentForUser(ownerId, {});
+      expect(current.items).toHaveLength(0);
       expect(await documents.findOne({ where: { id: v1.id } })).toBeNull();
     });
 
-    it('rejects deletion for a document owned by a different user', async () => {
+    it('rejects deletion for a document owned by a different user, as a 404 (Track 1 Group E)', async () => {
       const v1 = await service.uploadNew(
         'owner-a',
         { title: 'CV' },
@@ -453,7 +533,7 @@ describe('DocumentsService', () => {
       );
 
       await expect(service.remove(v1.id, 'owner-b')).rejects.toThrow(
-        ForbiddenException,
+        NotFoundException,
       );
       expect(cloudinaryService.deleteByPublicId).not.toHaveBeenCalled();
     });
@@ -483,6 +563,7 @@ describe('DocumentsService', () => {
       expect(cloudinaryService.deleteByPublicId).toHaveBeenCalledTimes(1);
       expect(cloudinaryService.deleteByPublicId).toHaveBeenCalledWith(
         v1.cloudinaryPublicId,
+        'raw',
       );
     });
 
@@ -509,6 +590,120 @@ describe('DocumentsService', () => {
         ConflictException,
       );
       expect(cloudinaryService.deleteByPublicId).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Production hardening (Batch 6) — compensating delete when the Cloudinary
+   * upload succeeds but the DB write that was supposed to record it fails,
+   * closing the orphan gap on the upload side (previously only the delete
+   * side logged/cleaned up after itself).
+   */
+  describe('upload-then-persist failure — compensating Cloudinary delete', () => {
+    it('uploadNew(): deletes the just-uploaded asset and rethrows the original DB error when save() fails', async () => {
+      documents.save.mockRejectedValueOnce(new Error('DB write failed'));
+
+      await expect(
+        service.uploadNew(ownerId, { title: 'CV' }, fakeFile()),
+      ).rejects.toThrow('DB write failed');
+
+      expect(cloudinaryService.deleteByPublicId).toHaveBeenCalledTimes(1);
+      expect(cloudinaryService.deleteByPublicId).toHaveBeenCalledWith(
+        'cloudinary-public-id-1',
+        'raw',
+      );
+      // No orphaned row was left behind either.
+      expect(await documents.find({ where: {} })).toHaveLength(0);
+    });
+
+    it('uploadNewVersion(): deletes the just-uploaded asset and rethrows when the transaction rolls back on a DB error', async () => {
+      const v1 = await service.uploadNew(ownerId, { title: 'CV' }, fakeFile());
+      documents.manager.transaction.mockRejectedValueOnce(
+        new Error('transaction failed'),
+      );
+
+      await expect(
+        service.uploadNewVersion(ownerId, v1.id, fakeFile(), {}),
+      ).rejects.toThrow('transaction failed');
+
+      expect(cloudinaryService.deleteByPublicId).toHaveBeenCalledWith(
+        'cloudinary-public-id-2',
+        'raw',
+      );
+    });
+
+    it('uploadNewVersion(): also cleans up the newly-uploaded asset when rejected by the concurrent-version race check', async () => {
+      const v1 = await service.uploadNew(ownerId, { title: 'CV' }, fakeFile());
+      await service.uploadNewVersion(ownerId, v1.id, fakeFile(), {}); // v1 is no longer current
+
+      await expect(
+        service.uploadNewVersion(ownerId, v1.id, fakeFile(), {}),
+      ).rejects.toThrow(ConflictException);
+
+      // The second call's own upload (publicId #3 — #1 is v1, #2 is the
+      // legitimate v2) is the one that must be cleaned up; it was never
+      // referenced by any Document row.
+      expect(cloudinaryService.deleteByPublicId).toHaveBeenCalledWith(
+        'cloudinary-public-id-3',
+        'raw',
+      );
+    });
+
+    it('logs, but does not throw the cleanup error, when the compensating delete itself also fails', async () => {
+      documents.save.mockRejectedValueOnce(new Error('DB write failed'));
+      cloudinaryService.deleteByPublicId.mockRejectedValueOnce(
+        new Error('Cloudinary is unreachable'),
+      );
+
+      // The original DB error surfaces, not the cleanup failure.
+      await expect(
+        service.uploadNew(ownerId, { title: 'CV' }, fakeFile()),
+      ).rejects.toThrow('DB write failed');
+    });
+  });
+
+  /** Production hardening (Batch 6) — signed delivery URLs. */
+  describe('getSignedDownloadUrl()', () => {
+    it('returns a signed URL for the resource type Cloudinary reported at upload time, plus the configured TTL', async () => {
+      const v1 = await service.uploadNew(ownerId, { title: 'CV' }, fakeFile());
+
+      const result = await service.getSignedDownloadUrl(v1.id, ownerId);
+
+      expect(cloudinaryService.getSignedDeliveryUrl).toHaveBeenCalledWith(
+        v1.cloudinaryPublicId,
+        'raw',
+      );
+      expect(result.url).toContain(v1.cloudinaryPublicId);
+      expect(result.expiresInSeconds).toBe(300);
+    });
+
+    it('rejects a document owned by a different user, as a 404', async () => {
+      const v1 = await service.uploadNew(
+        'owner-a',
+        { title: 'CV' },
+        fakeFile(),
+      );
+
+      await expect(
+        service.getSignedDownloadUrl(v1.id, 'owner-b'),
+      ).rejects.toThrow(NotFoundException);
+      expect(cloudinaryService.getSignedDeliveryUrl).not.toHaveBeenCalled();
+    });
+
+    it('falls back to inferring the resource type from mimeType for a pre-migration row with no stored cloudinaryResourceType', async () => {
+      const v1 = await service.uploadNew(ownerId, { title: 'CV' }, fakeFile());
+      // Simulate a row written before the `cloudinaryResourceType` column
+      // existed.
+      const row = await documents.findOne({ where: { id: v1.id } });
+      row.cloudinaryResourceType = null;
+      row.mimeType = 'image/png';
+
+      await service.getSignedDownloadUrl(v1.id, ownerId);
+
+      expect(cloudinaryService.getSignedDeliveryUrl).toHaveBeenCalledWith(
+        v1.cloudinaryPublicId,
+        'image',
+      );
     });
   });
 });

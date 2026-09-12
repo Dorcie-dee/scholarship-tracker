@@ -4,8 +4,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import { TaskDependencyType, TaskStatus } from '../types';
+import { AppConfig } from '../config/configuration';
+import {
+  applyKeysetPagination,
+  buildPaginatedResult,
+  decodeCursor,
+  PaginatedResult,
+  resolvePageSize,
+} from '../common/pagination/cursor';
 import { Task } from './entities/task.entity';
 import { JourneysService } from '../journeys/journeys.service';
 import { ApplicationsService } from '../applications/applications.service';
@@ -13,6 +22,7 @@ import { RequirementsService } from '../requirements/requirements.service';
 import { assertOwnership } from '../common/utils/ownership';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
+import { PaginationQueryDto } from '../common/pagination/pagination-query.dto';
 
 /**
  * Tasks are always owned via their journeyId (see task.entity.ts) — this is
@@ -31,6 +41,7 @@ export class TasksService {
     private readonly journeysService: JourneysService,
     private readonly applicationsService: ApplicationsService,
     private readonly requirementsService: RequirementsService,
+    private readonly configService: ConfigService<AppConfig, true>,
   ) {}
 
   /**
@@ -125,28 +136,126 @@ export class TasksService {
     return this.tasks.save(task);
   }
 
-  findAllForUser(
+  /**
+   * Production hardening (Batch 4) — keyset-paginated, ordered by
+   * `(createdAt, id)` DESC. Deliberately NOT `dueDate` (the previous default
+   * order) — `dueDate` is nullable, and a correct keyset comparison across a
+   * nullable column needs materially more complex SQL (NULLS-LAST handling
+   * on both sides of the cursor comparison) for no corresponding benefit
+   * here; `createdAt` is the same, always-present, monotonic axis every
+   * other paginated list in this codebase already uses. Still joined
+   * through `journey` to scope by `userId` first — pagination never loosens
+   * ownership. Clients that need "soonest due date" ordering can still sort
+   * client-side within a page, or filter by `dueDate` — no server-side
+   * capability was removed, only the *default* list order changed.
+   */
+  async findAllForUser(
     userId: string,
     filters: { journeyId?: string; applicationId?: string },
-  ): Promise<Task[]> {
-    return this.tasks.find({
-      where: {
-        journey: { userId },
-        ...(filters.journeyId ? { journeyId: filters.journeyId } : {}),
-        ...(filters.applicationId
-          ? { applicationId: filters.applicationId }
-          : {}),
-      },
-      relations: { journey: true },
-      order: { dueDate: 'ASC' },
+    query: PaginationQueryDto,
+  ): Promise<PaginatedResult<Task>> {
+    const { defaultPageSize, maxPageSize } = this.configService.get(
+      'pagination',
+      { infer: true },
+    );
+    const limit = resolvePageSize(query.limit, {
+      defaultPageSize,
+      maxPageSize,
     });
+    const direction = query.order === 'asc' ? 'ASC' : 'DESC';
+
+    const qb = this.tasks
+      .createQueryBuilder('task')
+      .innerJoin('task.journey', 'journey')
+      .andWhere('journey.userId = :userId', { userId })
+      // Product rule (soft-deleted Applications must not remain visible) —
+      // a Task's ownership anchor is its Journey (never soft-deleted), so
+      // this join+filter is the one place that needs to exist for the list
+      // path: a task attached to an Application still has its own
+      // independent row here, and nothing else in this query would
+      // otherwise notice that Application is gone. `LEFT JOIN` (not
+      // `INNER JOIN`) because `applicationId` is nullable — a
+      // journey-level task with no Application must still appear.
+      //
+      // The filter is `application.id IS NOT NULL`, NOT `application.
+      // deletedAt IS NULL` — confirmed by inspecting the actual generated
+      // SQL, not assumed: TypeORM automatically appends the joined entity's
+      // own `@DeleteDateColumn` condition to the JOIN's ON clause itself
+      // (`LEFT JOIN applications application ON application.id = task.
+      // application_id AND application.deleted_at IS NULL`), so a
+      // soft-deleted Application already fails to match and `application`
+      // comes back NULL from the join — indistinguishable, to a WHERE
+      // clause checking `application.deletedAt IS NULL`, from a task that
+      // never had an application at all (`NULL IS NULL` is true in SQL
+      // either way). Checking `application.id IS NOT NULL` instead asks the
+      // right question: "did the join actually find a live application",
+      // which is exactly what determines whether this task should be
+      // visible.
+      .leftJoin('task.application', 'application')
+      .andWhere('(task.applicationId IS NULL OR application.id IS NOT NULL)');
+    if (filters.journeyId) {
+      qb.andWhere('task.journeyId = :journeyId', {
+        journeyId: filters.journeyId,
+      });
+    }
+    if (filters.applicationId) {
+      qb.andWhere('task.applicationId = :applicationId', {
+        applicationId: filters.applicationId,
+      });
+    }
+    applyKeysetPagination(
+      qb,
+      'task.createdAt',
+      'task.id',
+      direction,
+      query.cursor ? decodeCursor(query.cursor) : undefined,
+      limit,
+    );
+
+    const rows = await qb.getMany();
+    return buildPaginatedResult(
+      rows,
+      limit,
+      (r) => r.createdAt.toISOString(),
+      (r) => r.id,
+    );
   }
 
+  /**
+   * Product rule — a soft-deleted Application's Tasks must not remain
+   * normally retrievable, even though a Task's own ownership anchor is its
+   * Journey (never soft-deleted itself). Deliberately a query builder, not
+   * `repository.findOne({relations})`: `findOne()`'s automatic
+   * `@DeleteDateColumn` exclusion only applies to the entity it's called
+   * directly ON (`Task` here), not to a relation loaded alongside it.
+   *
+   * The filter is `application.id IS NOT NULL`, NOT `application.deletedAt
+   * IS NULL` — confirmed by inspecting the actual generated SQL against
+   * real Postgres, not assumed: TypeORM automatically appends the joined
+   * entity's own `@DeleteDateColumn` condition to the JOIN's ON clause
+   * itself (`LEFT JOIN applications application ON application.id = task.
+   * application_id AND application.deleted_at IS NULL`), so a soft-deleted
+   * Application already fails to match and `application` comes back NULL
+   * from the join — indistinguishable, to a WHERE clause checking
+   * `application.deletedAt IS NULL`, from a task that never had an
+   * application at all (`NULL IS NULL` is true in SQL either way). An
+   * earlier version of this exact fix used `application.deletedAt IS NULL`
+   * and silently failed to exclude anything — caught only by a real HTTP
+   * integration test against real Postgres, not by a unit test with a
+   * hand-rolled query-builder mock (see tasks.service.spec.ts and
+   * test/http-integration/soft-delete-visibility.http-integration-spec.ts).
+   * `LEFT JOIN` (not `INNER JOIN`) is still required because `applicationId`
+   * is nullable — a journey-level task with no Application must still be
+   * found.
+   */
   private async findWithJourneyOrThrow(id: string): Promise<Task> {
-    const task = await this.tasks.findOne({
-      where: { id },
-      relations: { journey: true },
-    });
+    const task = await this.tasks
+      .createQueryBuilder('task')
+      .innerJoinAndSelect('task.journey', 'journey')
+      .leftJoin('task.application', 'application')
+      .where('task.id = :id', { id })
+      .andWhere('(task.applicationId IS NULL OR application.id IS NOT NULL)')
+      .getOne();
     if (!task) {
       throw new NotFoundException('Task not found');
     }

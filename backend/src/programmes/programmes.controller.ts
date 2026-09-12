@@ -15,6 +15,7 @@ import { UserRole } from '../types';
 import { ProgrammesService } from './programmes.service';
 import { CreateProgrammeDto } from './dto/create-programme.dto';
 import { UpdateProgrammeDto } from './dto/update-programme.dto';
+import { ListProgrammesQueryDto } from './dto/list-programmes-query.dto';
 
 /** Same read-open/mutation-ADMIN-only split as UniversitiesController — see its doc comment. */
 @Controller('programmes')
@@ -28,8 +29,8 @@ export class ProgrammesController {
   }
 
   @Get()
-  findAll(@Query('universityId') universityId?: string) {
-    return this.programmesService.findAll(universityId);
+  findAll(@Query() query: ListProgrammesQueryDto) {
+    return this.programmesService.findAll(query);
   }
 
   @Get(':id')
