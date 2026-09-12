@@ -17,12 +17,16 @@ import { CreateOpportunityDto } from './dto/create-opportunity.dto';
 import { UpdateOpportunityDto } from './dto/update-opportunity.dto';
 import { ListOpportunitiesQueryDto } from './dto/list-opportunities-query.dto';
 
-/** Same read-open/mutation-ADMIN-only split as UniversitiesController — see its doc comment. */
+/**
+ * Opportunities are funding finds users are tracking (and optionally a shared
+ * catalog). Any authenticated user may *create* one — recording “I found this
+ * scholarship” is the primary product entry, not an admin-only action.
+ * Update/delete of catalog rows stay ADMIN-only (shared reference curation).
+ */
 @Controller('opportunities')
 export class OpportunitiesController {
   constructor(private readonly opportunitiesService: OpportunitiesService) {}
 
-  @Roles(UserRole.ADMIN)
   @Post()
   create(@Body() dto: CreateOpportunityDto) {
     return this.opportunitiesService.create(dto);

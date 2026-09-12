@@ -96,13 +96,9 @@ export class CreateOpportunityDto {
    * Production hardening (Batch 8) — deliberately left without a shape/size
    * bound beyond `@IsObject()` and the global request body limit (256kb,
    * see bootstrap.ts). Unlike every other free-text field in this DTO
-   * (now `@MaxLength`-bounded — see text-limits.ts), this route is
-   * ADMIN-gated (see decisions.md, "RBAC dependency"): the abuse surface a
-   * per-field size cap exists to close — an arbitrary *authenticated user*
-   * writing unbounded data — doesn't apply the same way to a caller who
-   * already holds elevated trust. Adding a bespoke JSON-size validator here
-   * with no concrete abuse case behind it would be exactly the unnecessary
-   * complexity this phase's own instructions warn against.
+   * (now `@MaxLength`-bounded — see text-limits.ts), metadata is unbounded
+   * here by design for this phase; revisit if abuse appears once create is
+   * open to all authenticated users.
    */
   @IsOptional()
   @IsObject()

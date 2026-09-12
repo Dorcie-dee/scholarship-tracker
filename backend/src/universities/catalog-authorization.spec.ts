@@ -14,11 +14,17 @@ const ROLES_KEY = 'roles';
  * auth.controller.throttle.spec.ts) — not a re-implementation or a guess.
  *
  * Central location for all three catalog controllers (rather than one file
- * each) since the assertion — "mutation is ADMIN-only, reads are open" — is
- * one policy applied identically across all three; a single table makes
- * that policy visible in one place rather than split three ways.
+ * each) since the assertion is one policy table applied across all three —
+ * a single file makes it visible in one place rather than split three ways.
+ *
+ * Opportunities.create is the one deliberate exception to "mutation is
+ * ADMIN-only": recording a funding find ("I found this scholarship") is a
+ * primary product action for any authenticated user, not admin-curated
+ * catalog data — see OpportunitiesController's doc comment and
+ * docs/decisions.md. Update/remove (curating a shared catalog row) stay
+ * ADMIN-only, same as Universities/Programmes.
  */
-describe('Shared catalog controllers — mutation is ADMIN-only, reads are open', () => {
+describe('Shared catalog controllers — mutation is ADMIN-only (except Opportunities.create), reads are open', () => {
   const rolesOn = (
     proto: object,
     handlerName: string,
@@ -35,7 +41,6 @@ describe('Shared catalog controllers — mutation is ADMIN-only, reads are open'
     ['ProgrammesController', ProgrammesController.prototype, 'create'],
     ['ProgrammesController', ProgrammesController.prototype, 'update'],
     ['ProgrammesController', ProgrammesController.prototype, 'remove'],
-    ['OpportunitiesController', OpportunitiesController.prototype, 'create'],
     ['OpportunitiesController', OpportunitiesController.prototype, 'update'],
     ['OpportunitiesController', OpportunitiesController.prototype, 'remove'],
   ] as const)('%s.%s requires ADMIN', (_name, proto, handlerName) => {
@@ -49,10 +54,8 @@ describe('Shared catalog controllers — mutation is ADMIN-only, reads are open'
     ['ProgrammesController', ProgrammesController.prototype, 'findOne'],
     ['OpportunitiesController', OpportunitiesController.prototype, 'findAll'],
     ['OpportunitiesController', OpportunitiesController.prototype, 'findOne'],
-  ] as const)(
-    '%s.%s has no role restriction — catalog consumption stays open',
-    (_name, proto, handlerName) => {
-      expect(rolesOn(proto, handlerName)).toBeUndefined();
-    },
-  );
+    ['OpportunitiesController', OpportunitiesController.prototype, 'create'],
+  ] as const)('%s.%s has no role restriction', (_name, proto, handlerName) => {
+    expect(rolesOn(proto, handlerName)).toBeUndefined();
+  });
 });
