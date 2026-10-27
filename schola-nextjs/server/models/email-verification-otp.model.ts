@@ -8,6 +8,8 @@ export interface EmailVerificationOtpDoc {
   attempts: number;
   consumedAt: Date | null;
   invalidatedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 const schema = new Schema<EmailVerificationOtpDoc>(

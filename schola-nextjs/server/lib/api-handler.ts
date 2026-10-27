@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from './db';
 import { verifyAccessToken, type AccessTokenClaims } from './auth';
-import { buildErrorBody, HttpError, UnauthorizedError } from './http-errors';
+import { buildErrorBody, ForbiddenError, HttpError, UnauthorizedError } from './http-errors';
 import type { UserRole } from './enums';
+import { User } from '../models/user.model';
 
 export interface RouteContext<P extends Record<string, string> = Record<string, string>> {
   req: NextRequest;
@@ -61,8 +62,21 @@ export function withRoute<P extends Record<string, string> = Record<string, stri
           throw new UnauthorizedError('Missing or invalid access token');
         }
       }
-      if (options.roles && (!user || !options.roles.includes(user.role as UserRole))) {
-        throw new UnauthorizedError('Insufficient role for this action');
+      if (options.roles) {
+        // A live DB read, not the (possibly stale) JWT claim — ported from
+        // the original `RolesGuard`'s doc comment: "authorization uses the
+        // user's current role from the database ... so demotion takes
+        // effect immediately for admin-only routes." Only paid on
+        // role-gated routes — an ordinary authenticated route never pays
+        // this extra query.
+        const currentRole = user
+          ? ((await User.findById(user.sub).select('role').lean()) as { role: UserRole } | null)
+              ?.role
+          : undefined;
+        if (!currentRole || !options.roles.includes(currentRole)) {
+          throw new ForbiddenError('Insufficient role for this action');
+        }
+        user = { ...(user as AccessTokenClaims), role: currentRole };
       }
 
       const params = await routeCtx.params;

@@ -10,6 +10,8 @@ export interface RefreshSessionDoc {
   revokedDueToReuse: boolean;
   userAgent: string | null;
   ipAddress: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 const refreshSessionSchema = new Schema<RefreshSessionDoc>(

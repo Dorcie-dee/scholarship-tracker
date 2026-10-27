@@ -39,6 +39,14 @@ const DEFAULT_ALLOWED_MIME_TYPES = [
 export interface AppConfig {
   nodeEnv: string;
   isProduction: boolean;
+  /**
+   * This app's own base URL — used to build links in emails
+   * (verify-email/reset-password). Unlike the original two-repo backend
+   * (which needed a separate `FRONTEND_URL` for CORS + email links across
+   * two origins), frontend and backend are the same Next.js app/origin here,
+   * so there is no separate CORS concern — only the email-link use remains.
+   */
+  appUrl: string;
   mongodbUri: string;
   mongodbDbName: string;
   auth: {
@@ -92,6 +100,7 @@ export function getConfig(): AppConfig {
   cached = {
     nodeEnv,
     isProduction: nodeEnv === 'production',
+    appUrl: process.env.APP_URL ?? 'http://localhost:3000',
     mongodbUri: process.env.MONGODB_URI ?? '',
     mongodbDbName: process.env.MONGODB_DB_NAME ?? 'schola',
     auth: {

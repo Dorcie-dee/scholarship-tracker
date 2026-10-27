@@ -1,4 +1,4 @@
-import { randomBytes, createHash } from 'node:crypto';
+import { randomBytes, randomInt, createHash } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
 import { getConfig } from './config';
@@ -83,6 +83,13 @@ export function hashOpaqueToken(token: string): string {
 }
 
 /** 6-digit email verification code. */
+/**
+ * `crypto.randomInt()`, not `Math.random()` — an OTP gates email
+ * verification, and this codebase's standing rule (ported from the original
+ * `EmailVerificationService.issueOtp()`) is that nothing security-adjacent
+ * uses non-cryptographic randomness, even where the stakes are lower than a
+ * password/token.
+ */
 export function generateOtp(): string {
-  return String(Math.floor(100_000 + Math.random() * 900_000));
+  return String(randomInt(100_000, 1_000_000));
 }
