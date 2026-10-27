@@ -3,7 +3,8 @@ import { cn } from '@/lib/cn';
 
 export type PillTone = 'primary' | 'success' | 'warning' | 'danger' | 'neutral' | 'accent';
 
-const TONE_CLASSES: Record<PillTone, string> = {
+/** Exported so a control that needs pill *coloring* without the `<span>` itself (e.g. an editable status `<select>`) can reuse the same tone map. */
+export const PILL_TONE_CLASSES: Record<PillTone, string> = {
   primary: 'bg-primary-soft text-primary',
   success: 'bg-success-soft text-success',
   warning: 'bg-warning-soft text-warning',
@@ -21,7 +22,7 @@ export function Pill({ tone = 'neutral', className, ...props }: PillProps) {
     <span
       className={cn(
         'inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold',
-        TONE_CLASSES[tone],
+        PILL_TONE_CLASSES[tone],
         className,
       )}
       {...props}

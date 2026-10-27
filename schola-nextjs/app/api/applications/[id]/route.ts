@@ -2,7 +2,7 @@ import { withRoute } from '@/server/lib/api-handler';
 import { noContent, ok } from '@/server/lib/response';
 import { parseBody } from '@/server/lib/validate';
 import {
-  getApplicationOwnedOrThrow,
+  getApplicationForViewOwnedOrThrow,
   softDeleteApplication,
   updateApplication,
 } from '@/server/services/applications.service';
@@ -10,8 +10,14 @@ import { updateApplicationSchema } from '@/server/validation/applications';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Deliberately uses `getApplicationForViewOwnedOrThrow`, not
+ * `getApplicationOwnedOrThrow` — a soft-deleted application must still be
+ * viewable (with `deletedAt` set) by its owner so the frontend can offer a
+ * restore action, rather than 404ing indistinguishably from "never existed."
+ */
 export const GET = withRoute<{ id: string }>(async (ctx) => {
-  const application = await getApplicationOwnedOrThrow(ctx.params.id, ctx.user!.sub);
+  const application = await getApplicationForViewOwnedOrThrow(ctx.params.id, ctx.user!.sub);
   return ok(application);
 });
 

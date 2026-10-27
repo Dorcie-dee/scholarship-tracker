@@ -79,6 +79,34 @@ export async function getApplicationOwnedOrThrow(
   return application;
 }
 
+/**
+ * Like `getApplicationOwnedOrThrow`, but deliberately does NOT filter
+ * `deletedAt` — for the single "view this one Application" GET only, so a
+ * soft-deleted application's owner can still load it (and see a restore
+ * affordance) rather than hitting an indistinguishable-from-"never
+ * existed" 404 the moment they reload the page. Every other call site
+ * (update, delete, attach/detach a document, create a requirement/task/
+ * deadline/snapshot against it, etc.) must keep using
+ * `getApplicationOwnedOrThrow` — acting on a soft-deleted application
+ * should still fail there.
+ */
+export async function getApplicationForViewOwnedOrThrow(
+  id: string,
+  userId: string,
+): Promise<ApplicationDocumentRecord> {
+  assertValidObjectId(id, 'Application not found');
+  const application = await Application.findById(id);
+  if (!application) {
+    throw new NotFoundError('Application not found');
+  }
+  const journey = await ApplicationJourney.findById(application.journeyId);
+  if (!journey) {
+    throw new NotFoundError('Application not found');
+  }
+  assertOwnership(journey.userId, userId);
+  return application;
+}
+
 /** Used by sibling modules (requirements/tasks/deadlines, ported separately) to verify ownership by applicationId only. */
 export async function assertApplicationOwnedByUser(applicationId: string, userId: string): Promise<void> {
   await getApplicationOwnedOrThrow(applicationId, userId);
