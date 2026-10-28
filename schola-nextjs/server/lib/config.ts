@@ -143,6 +143,15 @@ export interface AppConfig {
     maxRedirects: number;
   };
   requirementAi: { enabled: boolean; timeoutMs: number };
+  /**
+   * Gates the two scheduled-maintenance endpoints (`/api/cron/*`) — there's
+   * no in-process cron host in Next.js, so an external scheduler (GitHub
+   * Actions, Vercel Cron, etc.) calls these on a timer instead. No
+   * hardcoded fallback (same reasoning as `auth.jwtAccessSecret`): if unset,
+   * the cron routes simply always reject rather than accepting any/no
+   * secret, so they're safe-by-default until explicitly configured.
+   */
+  cron: { secret: string };
 }
 
 let cached: AppConfig | null = null;
@@ -214,6 +223,9 @@ export function getConfig(): AppConfig {
     requirementAi: {
       enabled: bool('REQUIREMENT_AI_ENABLED', true),
       timeoutMs: int('REQUIREMENT_AI_TIMEOUT_MS', 5000),
+    },
+    cron: {
+      secret: process.env.CRON_SECRET ?? '',
     },
   };
   return cached;

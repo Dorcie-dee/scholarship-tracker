@@ -10,6 +10,7 @@ import {
   ArrowLeftIcon,
   HomeIcon,
   type IconProps,
+  LockIcon,
   LogOutIcon,
   MenuIcon,
   SearchIcon,
@@ -23,6 +24,13 @@ const NAV_ITEMS: Array<{ href: string; label: string; icon: ComponentType<IconPr
   { href: '/discover', label: 'Discover', icon: SearchIcon },
   { href: '/profile', label: 'Profile', icon: UserIcon },
 ];
+
+/** Only shown to admins — appended in `SidebarContents` rather than kept in `NAV_ITEMS` itself, so that static array stays the same for every other user. */
+const ADMIN_NAV_ITEM: { href: string; label: string; icon: ComponentType<IconProps> } = {
+  href: '/admin',
+  label: 'Admin',
+  icon: LockIcon,
+};
 
 const COLLAPSE_KEY = 'schola:sidebar-collapsed';
 
@@ -85,6 +93,7 @@ function SidebarContents({
 }) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
+  const navItems = user?.role === 'admin' ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS;
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-y-auto scrollbar-thin px-3 py-6">
@@ -100,7 +109,7 @@ function SidebarContents({
       </Link>
 
       <nav aria-label="Main" className="flex flex-col gap-1">
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <NavLink key={item.href} item={item} active={active} collapsed={collapsed} onNavigate={onNavigate} />
