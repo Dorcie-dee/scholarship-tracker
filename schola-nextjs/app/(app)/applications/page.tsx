@@ -12,13 +12,14 @@ import { FieldError, Input, Label } from '@/components/ui/form';
 import { ApplicationCard } from '@/components/applications/application-card';
 import { PlusIcon, SearchIcon, XIcon } from '@/components/icons';
 import {
+  groupBy,
   requirementProgress,
   soonestUpcomingDeadline,
-  useApplicationDeadlines,
-  useApplicationRequirements,
+  useAllDeadlines,
+  useAllRequirements,
   useApplications,
   useJourneys,
-  useOpportunities,
+  useOpportunitiesByIds,
   type Application,
 } from '@/_lib/application-data';
 
@@ -151,32 +152,24 @@ export default function ApplicationsPage() {
 
   const journeys = journeysQuery.data?.items ?? [];
   const applications = applicationsQuery.data?.items ?? [];
-  const applicationIds = applications.map((a) => a.id);
   const opportunityIds = Array.from(
     new Set(applications.map((a) => a.opportunityId).filter((id): id is string => Boolean(id))),
   );
 
-  const requirementsQueries = useApplicationRequirements(applicationIds);
-  const deadlinesQueries = useApplicationDeadlines(applicationIds);
-  const opportunitiesQueries = useOpportunities(opportunityIds);
+  // Flat, constant-count queries (not one per application) — see
+  // `app/_lib/application-data.ts`'s doc comment.
+  const requirementsQuery = useAllRequirements();
+  const deadlinesQuery = useAllDeadlines();
+  const opportunitiesQuery = useOpportunitiesByIds(opportunityIds);
 
   const requirementsByApplicationId = new Map<string, ReturnType<typeof requirementProgress>>();
-  applicationIds.forEach((id, i) => {
-    const result = requirementsQueries[i];
-    if (result?.data) requirementsByApplicationId.set(id, requirementProgress(result.data.items));
-  });
+  groupBy(requirementsQuery.data?.items ?? [], (r) => r.applicationId).forEach((items, id) =>
+    requirementsByApplicationId.set(id, requirementProgress(items)),
+  );
 
-  const deadlinesByApplicationId = new Map<string, ReturnType<typeof useApplicationDeadlines>[number]['data']>();
-  applicationIds.forEach((id, i) => {
-    const result = deadlinesQueries[i];
-    if (result?.data) deadlinesByApplicationId.set(id, result.data);
-  });
+  const deadlinesByApplicationId = groupBy(deadlinesQuery.data?.items ?? [], (d) => d.applicationId);
 
-  const opportunityById = new Map<string, NonNullable<(typeof opportunitiesQueries)[number]['data']>>();
-  opportunityIds.forEach((id, i) => {
-    const result = opportunitiesQueries[i];
-    if (result?.data) opportunityById.set(id, result.data);
-  });
+  const opportunityById = new Map((opportunitiesQuery.data?.items ?? []).map((o) => [o.id, o]));
 
   const isInitialLoading = journeysQuery.isLoading || applicationsQuery.isLoading;
   const loadError = journeysQuery.error ?? applicationsQuery.error;
@@ -308,7 +301,7 @@ export default function ApplicationsPage() {
               ) : (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {apps.map((application) => {
-                    const deadlines = deadlinesByApplicationId.get(application.id)?.items;
+                    const deadlines = deadlinesByApplicationId.get(application.id);
                     return (
                       <ApplicationCard
                         key={application.id}

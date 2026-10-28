@@ -92,6 +92,25 @@ describe('opportunities.service', () => {
       const result = await listOpportunities({});
       expect(result.items.map((o) => String(o._id))).toEqual([String(newer._id), String(older._id)]);
     });
+
+    it('ids filter resolves exactly the requested opportunities in one call (the dashboard bulk-lookup use case)', async () => {
+      const a = await Opportunity.create({ title: 'A' });
+      const b = await Opportunity.create({ title: 'B' });
+      await Opportunity.create({ title: 'Not requested' });
+
+      const result = await listOpportunities({ ids: `${String(a._id)},${String(b._id)}` });
+
+      expect(result.items.map((o) => String(o._id)).sort()).toEqual([String(a._id), String(b._id)].sort());
+    });
+
+    it('ids filter silently drops a malformed id rather than erroring', async () => {
+      const a = await Opportunity.create({ title: 'A' });
+
+      const result = await listOpportunities({ ids: `${String(a._id)},not-a-real-id` });
+
+      expect(result.items).toHaveLength(1);
+      expect(String(result.items[0]._id)).toBe(String(a._id));
+    });
   });
 
   describe('getOpportunityOrThrow', () => {

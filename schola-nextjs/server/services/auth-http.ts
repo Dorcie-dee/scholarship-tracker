@@ -1,7 +1,10 @@
 import type { NextRequest } from 'next/server';
 import { cookies } from 'next/headers';
 import { getConfig } from '../lib/config';
+import { getClientIp } from '../lib/request-ip';
 import type { IssuedTokens, RequestMeta } from './auth.service';
+
+export { getClientIp };
 
 /**
  * The thin HTTP-layer glue the `/api/auth/*` route handlers share: pulling
@@ -15,15 +18,6 @@ import type { IssuedTokens, RequestMeta } from './auth.service';
  * (`setRefreshCookie`/`clearRefreshCookie`/`readRefreshCookie`/
  * `requestMeta`).
  */
-
-export function getClientIp(req: NextRequest): string {
-  const forwardedFor = req.headers.get('x-forwarded-for');
-  if (forwardedFor) {
-    const first = forwardedFor.split(',')[0]?.trim();
-    if (first) return first;
-  }
-  return req.headers.get('x-real-ip') ?? 'unknown';
-}
 
 export function buildRequestMeta(req: NextRequest): RequestMeta {
   const ip = getClientIp(req);

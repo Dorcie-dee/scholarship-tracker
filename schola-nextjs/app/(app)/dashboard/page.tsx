@@ -20,16 +20,17 @@ import {
   SparklesIcon,
 } from '@/components/icons';
 import {
+  groupBy,
   isDeadlineUpcoming,
   isTaskOpen,
   requirementProgress,
   soonestUpcomingDeadline,
+  useAllDeadlines,
+  useAllRequirements,
   useAllTasks,
-  useApplicationDeadlines,
-  useApplicationRequirements,
   useApplications,
   useJourneys,
-  useOpportunities,
+  useOpportunitiesByIds,
   type Deadline,
   type PaginatedResult,
   type Task,
@@ -104,15 +105,14 @@ export default function DashboardPage() {
   const tasksQuery = useAllTasks();
 
   const applications = useMemo(() => applicationsQuery.data?.items ?? [], [applicationsQuery.data]);
-  const applicationIds = useMemo(() => applications.map((a) => a.id), [applications]);
   const opportunityIds = useMemo(
     () => Array.from(new Set(applications.map((a) => a.opportunityId).filter((id): id is string => Boolean(id)))),
     [applications],
   );
 
-  const requirementsQueries = useApplicationRequirements(applicationIds);
-  const deadlinesQueries = useApplicationDeadlines(applicationIds);
-  const opportunitiesQueries = useOpportunities(opportunityIds);
+  const requirementsQuery = useAllRequirements();
+  const deadlinesQuery = useAllDeadlines();
+  const opportunitiesQuery = useOpportunitiesByIds(opportunityIds);
 
   const toggleTask = useMutation({
     mutationFn: ({ id, status }: { id: string; status: 'todo' | 'done' }) =>
@@ -136,35 +136,37 @@ export default function DashboardPage() {
   const isInitialLoading = journeysQuery.isLoading || applicationsQuery.isLoading || tasksQuery.isLoading;
   const loadError = journeysQuery.error ?? applicationsQuery.error ?? tasksQuery.error;
 
-  // Not wrapped in useMemo: React Query already gives each `.data` a stable
-  // reference between renders, and these maps are cheap to rebuild for the
-  // realistic (small) number of applications this page deals with — a
-  // useMemo here would need its dependency array to capture every query's
-  // `.data` individually anyway, which is no simpler than just recomputing.
-  const requirementsByApplicationId = new Map<string, ReturnType<typeof requirementProgress>>();
-  applicationIds.forEach((id, i) => {
-    const result = requirementsQueries[i];
-    if (result?.data) requirementsByApplicationId.set(id, requirementProgress(result.data.items));
-  });
+  // Each of these is now one flat list (not one query per application), so
+  // building the per-application maps is just a client-side group-by — see
+  // `app/_lib/application-data.ts`'s doc comment for why this no longer
+  // fans out a request per application the way it originally did.
+  const requirementsByApplicationId = useMemo(() => {
+    const grouped = groupBy(requirementsQuery.data?.items ?? [], (r) => r.applicationId);
+    const progress = new Map<string, ReturnType<typeof requirementProgress>>();
+    grouped.forEach((items, id) => progress.set(id, requirementProgress(items)));
+    return progress;
+  }, [requirementsQuery.data]);
 
-  const deadlinesByApplicationId = new Map<string, Deadline[]>();
-  applicationIds.forEach((id, i) => {
-    const result = deadlinesQueries[i];
-    if (result?.data) deadlinesByApplicationId.set(id, result.data.items);
-  });
+  const deadlinesByApplicationId = useMemo(
+    () => groupBy(deadlinesQuery.data?.items ?? [], (d) => d.applicationId),
+    [deadlinesQuery.data],
+  );
 
-  const opportunityById = new Map<string, NonNullable<(typeof opportunitiesQueries)[number]['data']>>();
-  opportunityIds.forEach((id, i) => {
-    const result = opportunitiesQueries[i];
-    if (result?.data) opportunityById.set(id, result.data);
-  });
+  const opportunityById = useMemo(
+    () => new Map((opportunitiesQuery.data?.items ?? []).map((o) => [o.id, o])),
+    [opportunitiesQuery.data],
+  );
 
-  const allDeadlines = useMemo(() => Array.from(deadlinesByApplicationId.values()).flat(), [deadlinesByApplicationId]);
+  // The full "due soon" feed, not `deadlinesByApplicationId`'s values — that
+  // map is grouped BY applicationId and so silently excludes a deadline
+  // reachable only via a journey-level task/requirement (no applicationId
+  // of its own), which the "what's coming up" feed should still surface.
+  const allDeadlines = deadlinesQuery.data?.items ?? [];
   const tasks = tasksQuery.data?.items ?? [];
 
   const activeApplicationsCount = applications.filter((a) => !TERMINAL_APPLICATION_STATUSES.has(a.status)).length;
 
-  const requirementsLoaded = applicationIds.length === 0 || requirementsByApplicationId.size === applicationIds.length;
+  const requirementsLoaded = !requirementsQuery.isLoading;
   const overallProgress = useMemo(() => {
     let met = 0;
     let total = 0;
@@ -175,7 +177,7 @@ export default function DashboardPage() {
     return total > 0 ? Math.round((met / total) * 100) : null;
   }, [requirementsByApplicationId]);
 
-  const deadlinesLoaded = applicationIds.length === 0 || deadlinesByApplicationId.size === applicationIds.length;
+  const deadlinesLoaded = !deadlinesQuery.isLoading;
   const upcomingDeadlineCount = allDeadlines.filter((d) => isDeadlineUpcoming(d.status)).length;
 
   const openTaskCount = tasks.filter((t) => isTaskOpen(t.status)).length;

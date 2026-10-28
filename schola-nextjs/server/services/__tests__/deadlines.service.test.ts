@@ -28,8 +28,9 @@ describe('deadlines.service', () => {
       ).rejects.toThrow(BadRequestError);
     });
 
-    it('listDeadlines with no filters surfaces as a clean BadRequestError', async () => {
-      await expect(listDeadlines(userId, {}, {})).rejects.toThrow(BadRequestError);
+    it('listDeadlines with no filters falls back to "all of the caller\'s own" rather than erroring', async () => {
+      const result = await listDeadlines(userId, {}, {});
+      expect(result.items).toEqual([]);
     });
 
     it('creates fine when exactly one FK field (opportunityId) is given', async () => {
@@ -117,6 +118,67 @@ describe('deadlines.service', () => {
       const page = await listDeadlines(userId, { opportunityId: String(opportunity._id) }, {});
       expect(page.items).toHaveLength(1);
       expect(page.items[0].label).toBe('A');
+    });
+  });
+
+  describe('listDeadlines "all mine" fallback (no filters given)', () => {
+    it('returns deadlines reachable via an application, a task, or a requirement the caller owns', async () => {
+      const journey = await makeJourney();
+      const application = await makeApplication(String(journey._id));
+      const task = await createTask(userId, { journeyId: String(journey._id), title: 'Submit' });
+      const requirement = await createRequirement(userId, {
+        requirementType: RequirementType.OTHER,
+        description: 'Upload transcript',
+        applicationId: String(application._id),
+      });
+
+      await createDeadline(userId, { label: 'App deadline', date: new Date().toISOString(), applicationId: String(application._id) });
+      await createDeadline(userId, { label: 'Task deadline', date: new Date().toISOString(), taskId: String(task._id) });
+      await createDeadline(userId, { label: 'Requirement deadline', date: new Date().toISOString(), requirementId: String(requirement._id) });
+
+      const result = await listDeadlines(userId, {}, {});
+      const labels = result.items.map((d) => d.label).sort();
+      expect(labels).toEqual(['App deadline', 'Requirement deadline', 'Task deadline']);
+    });
+
+    it('never returns another user\'s deadlines', async () => {
+      const journey = await makeJourney(otherUserId);
+      const application = await makeApplication(String(journey._id), otherUserId);
+      await createDeadline(otherUserId, {
+        label: 'Not mine',
+        date: new Date().toISOString(),
+        applicationId: String(application._id),
+      });
+
+      const result = await listDeadlines(userId, {}, {});
+      expect(result.items).toEqual([]);
+    });
+
+    it('excludes a deadline whose application has since been soft-deleted', async () => {
+      const journey = await makeJourney();
+      const application = await makeApplication(String(journey._id));
+      await createDeadline(userId, {
+        label: 'Will be orphaned',
+        date: new Date().toISOString(),
+        applicationId: String(application._id),
+      });
+      application.deletedAt = new Date();
+      await application.save();
+
+      const result = await listDeadlines(userId, {}, {});
+      expect(result.items).toEqual([]);
+    });
+
+    it('excludes a catalog-only, opportunity-scoped deadline (not reachable via anything the caller owns)', async () => {
+      const opportunity = await Opportunity.create({ title: 'Fulbright' });
+      await createDeadline(userId, {
+        label: 'Opportunity-only',
+        date: new Date().toISOString(),
+        opportunityId: String(opportunity._id),
+      });
+
+      const result = await listDeadlines(userId, {}, {});
+      expect(result.items).toEqual([]);
     });
   });
 });

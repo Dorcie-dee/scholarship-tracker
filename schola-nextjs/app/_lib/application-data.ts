@@ -3,25 +3,26 @@
 /**
  * Shared React Query hooks + types for the Dashboard and "My applications"
  * pages. New file (not part of the protected `app/lib/*` foundation) so
- * those shared files stay untouched — see the two pages' doc comments for
- * why the data is composed this way.
+ * those shared files stay untouched.
  *
- * There is no single dashboard-aggregation endpoint, so this module fans
- * out a handful of list calls per page load:
- *  - Journeys/Applications/Tasks each support listing ALL of the caller's
- *    own rows in one call (no required scoping filter), so those are one
- *    `useQuery` each.
- *  - Requirements and Deadlines both REQUIRE a filter (there's no
- *    `journeyId`/"all mine" filter on either), so progress-per-application
- *    and deadlines-per-application are fetched with `useQueries` — one
- *    request per application, run in parallel, not a sequential waterfall.
- *  - Opportunities are looked up the same way, one per distinct
- *    `opportunityId` referenced by the caller's applications.
- * This is pragmatic for the realistic case (a handful of journeys/
- * applications per student), not a general solution for hundreds of rows.
+ * There is no single dashboard-aggregation endpoint, but every list here is
+ * now a flat, constant-count set of calls regardless of how many
+ * applications the caller has — no per-application fan-out:
+ *  - Journeys/Applications/Tasks/Requirements/Deadlines each support
+ *    listing ALL of the caller's own rows in one call (no required scoping
+ *    filter — Requirements/Deadlines gained this "all mine" fallback
+ *    specifically so this page could stop fanning out; see
+ *    `server/services/requirements.service.ts#listRequirements` and
+ *    `deadlines.service.ts#listDeadlines`), so those are one `useQuery` each.
+ *  - Opportunities are resolved with a single bulk `?ids=a,b,c` lookup
+ *    against every distinct `opportunityId` the caller's applications
+ *    reference (`server/services/opportunities.service.ts#listOpportunities`),
+ *    not one request per opportunity.
+ * Total page-load cost is ~6 requests regardless of application count,
+ * where it used to be `3 + 3N`.
  */
 
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api-client';
 import { REQUIREMENT_MET_STATUSES } from '@/lib/status';
 
@@ -145,31 +146,45 @@ export function useAllTasks() {
   });
 }
 
-export function useApplicationRequirements(applicationIds: string[]) {
-  return useQueries({
-    queries: applicationIds.map((id) => ({
-      queryKey: ['requirements', id],
-      queryFn: () => apiFetch<PaginatedResult<Requirement>>(`/requirements?applicationId=${id}&limit=${LIST_LIMIT}`),
-    })),
+/** No `applicationId`/`opportunityId` filter -> every Requirement across every one of the caller's own applications, in one call. */
+export function useAllRequirements() {
+  return useQuery({
+    queryKey: ['requirements'],
+    queryFn: () => apiFetch<PaginatedResult<Requirement>>(`/requirements?limit=${LIST_LIMIT}`),
   });
 }
 
-export function useApplicationDeadlines(applicationIds: string[]) {
-  return useQueries({
-    queries: applicationIds.map((id) => ({
-      queryKey: ['deadlines', 'application', id],
-      queryFn: () => apiFetch<PaginatedResult<Deadline>>(`/deadlines?applicationId=${id}&limit=${LIST_LIMIT}`),
-    })),
+/** No filter -> every Deadline reachable via an application/task/requirement the caller owns, in one call. */
+export function useAllDeadlines() {
+  return useQuery({
+    queryKey: ['deadlines'],
+    queryFn: () => apiFetch<PaginatedResult<Deadline>>(`/deadlines?limit=${LIST_LIMIT}`),
   });
 }
 
-export function useOpportunities(opportunityIds: string[]) {
-  return useQueries({
-    queries: opportunityIds.map((id) => ({
-      queryKey: ['opportunity', id],
-      queryFn: () => apiFetch<Opportunity>(`/opportunities/${id}`),
-    })),
+/** One bulk lookup for every distinct opportunityId, instead of one request per opportunity. */
+export function useOpportunitiesByIds(opportunityIds: string[]) {
+  return useQuery({
+    queryKey: ['opportunities', 'byIds', ...[...opportunityIds].sort()],
+    queryFn: () =>
+      apiFetch<PaginatedResult<Opportunity>>(
+        `/opportunities?ids=${opportunityIds.join(',')}&limit=${LIST_LIMIT}`,
+      ),
+    enabled: opportunityIds.length > 0,
   });
+}
+
+/** Groups a flat list by its `applicationId` (or `opportunityId`/`id`) field — the client-side counterpart to the backend's flat "all mine" lists. */
+export function groupBy<T>(items: T[], key: (item: T) => string | null): Map<string, T[]> {
+  const map = new Map<string, T[]>();
+  for (const item of items) {
+    const k = key(item);
+    if (k === null) continue;
+    const existing = map.get(k);
+    if (existing) existing.push(item);
+    else map.set(k, [item]);
+  }
+  return map;
 }
 
 export interface RequirementProgress {

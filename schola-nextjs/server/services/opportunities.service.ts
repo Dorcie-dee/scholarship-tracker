@@ -80,6 +80,17 @@ export async function listOpportunities(
   if (query.opportunityType) filter.opportunityType = query.opportunityType;
   if (query.universityId) filter.universityId = query.universityId;
   if (query.programmeId) filter.programmeId = query.programmeId;
+  if (query.ids) {
+    // Malformed ids are dropped rather than rejected — a bulk lookup by a
+    // caller-supplied id list should return what it can match, the same way
+    // any other filter here would just match nothing rather than 400 for an
+    // id that happens not to exist.
+    const validIds = query.ids
+      .split(',')
+      .map((id) => id.trim())
+      .filter(isValidObjectId);
+    filter._id = { $in: validIds };
+  }
 
   return paginate(Opportunity, {
     filter,

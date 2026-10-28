@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { PILL_TONE_CLASSES } from '@/components/ui/pill';
+import { ConfirmAction } from '@/components/ui/confirm-action';
 import { ArrowLeftIcon, TrashIcon } from '@/components/icons';
 import { cn } from '@/lib/cn';
 import { ApplicationDetailsCard } from './application-details-card';
@@ -259,19 +260,19 @@ export default function ApplicationDetailPage() {
                 </option>
               ))}
             </select>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                if (window.confirm('Delete this application? You can restore it later from here, within the retention window.')) {
-                  deleteApplication.mutate();
-                }
-              }}
+            <ConfirmAction
+              prompt="Delete this application? You can restore it later, within the retention window."
+              confirmLabel="Delete"
               disabled={deleteApplication.isPending}
+              onConfirm={() => deleteApplication.mutate()}
             >
-              <TrashIcon size={14} aria-hidden="true" />
-              {deleteApplication.isPending ? 'Deleting…' : 'Delete'}
-            </Button>
+              {(startConfirm) => (
+                <Button variant="secondary" size="sm" onClick={startConfirm} disabled={deleteApplication.isPending}>
+                  <TrashIcon size={14} aria-hidden="true" />
+                  {deleteApplication.isPending ? 'Deleting…' : 'Delete'}
+                </Button>
+              )}
+            </ConfirmAction>
           </div>
         </div>
         {updateStatus.isError && <TabError message={friendlyErrorMessage(updateStatus.error)} />}

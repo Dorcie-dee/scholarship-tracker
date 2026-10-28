@@ -7,6 +7,7 @@ import { requirementStatusMeta, formatDate } from '@/lib/status';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Pill } from '@/components/ui/pill';
+import { ConfirmAction } from '@/components/ui/confirm-action';
 import { FieldError, Label, Textarea } from '@/components/ui/form';
 import { PencilIcon, PlusIcon, SparklesIcon, TrashIcon } from '@/components/icons';
 import {
@@ -208,21 +209,18 @@ function RequirementCard({ applicationId, requirement }: { applicationId: string
           <p className="mt-2 text-sm font-medium text-ink">{requirement.description}</p>
           {requirement.notes && <p className="mt-1 text-sm text-ink-soft">{requirement.notes}</p>}
         </div>
-        <RowActions>
-          <button type="button" className={iconButtonClass()} aria-label="Edit requirement" onClick={() => setEditing(true)}>
-            <PencilIcon size={16} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className={iconButtonClass('danger')}
-            aria-label="Delete requirement"
-            onClick={() => {
-              if (window.confirm('Delete this requirement? This cannot be undone.')) remove.mutate();
-            }}
-          >
-            <TrashIcon size={16} aria-hidden="true" />
-          </button>
-        </RowActions>
+        <ConfirmAction prompt="Delete this requirement?" disabled={remove.isPending} onConfirm={() => remove.mutate()}>
+          {(startConfirm) => (
+            <RowActions>
+              <button type="button" className={iconButtonClass()} aria-label="Edit requirement" onClick={() => setEditing(true)}>
+                <PencilIcon size={16} aria-hidden="true" />
+              </button>
+              <button type="button" className={iconButtonClass('danger')} aria-label="Delete requirement" onClick={startConfirm}>
+                <TrashIcon size={16} aria-hidden="true" />
+              </button>
+            </RowActions>
+          )}
+        </ConfirmAction>
       </div>
 
       {requirement.suggestedStatus ? (

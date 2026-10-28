@@ -3,8 +3,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from './db';
 import { verifyAccessToken, type AccessTokenClaims } from './auth';
 import { buildErrorBody, ForbiddenError, HttpError, UnauthorizedError } from './http-errors';
+import { assertNotRateLimited } from './rate-limit';
+import { getClientIp } from './request-ip';
 import type { UserRole } from './enums';
 import { User } from '../models/user.model';
+
+/**
+ * Applied to every authenticated route that doesn't already call
+ * `assertNotRateLimited` itself — a generous abuse-prevention baseline
+ * (document upload, CRUD, profile updates, catalog browsing, etc. had NO
+ * rate limit at all before this), not a replacement for the tighter,
+ * `strict: true` per-route limits already on the auth/SSRF-adjacent routes.
+ * Fails OPEN (default `strict: false`) on a rate-limit-store error — a
+ * transient DB blip must not take down every route in the app.
+ */
+const DEFAULT_ROUTE_RATE_LIMIT = { max: 300, windowSeconds: 60 };
 
 export interface RouteContext<P extends Record<string, string> = Record<string, string>> {
   req: NextRequest;
@@ -77,6 +90,11 @@ export function withRoute<P extends Record<string, string> = Record<string, stri
           throw new ForbiddenError('Insufficient role for this action');
         }
         user = { ...(user as AccessTokenClaims), role: currentRole };
+      }
+
+      if (authMode !== 'none') {
+        const key = user ? `route:user:${user.sub}` : `route:ip:${getClientIp(req)}`;
+        await assertNotRateLimited(key, DEFAULT_ROUTE_RATE_LIMIT);
       }
 
       const params = await routeCtx.params;

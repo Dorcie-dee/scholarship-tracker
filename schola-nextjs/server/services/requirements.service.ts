@@ -1,10 +1,12 @@
-import type { HydratedDocument } from 'mongoose';
+import { Types, type HydratedDocument } from 'mongoose';
 import { Requirement, type RequirementDoc } from '../models/requirement.model';
+import { ApplicationJourney } from '../models/application-journey.model';
 import { paginate, type PaginatedResult } from '../lib/pagination';
 import { BadRequestError, NotFoundError } from '../lib/http-errors';
 import {
   assertApplicationOwnedByUser,
   assertValidObjectId,
+  findLiveApplicationIds,
   findOpportunityOrThrow,
 } from './access';
 import type { CreateRequirementInput, UpdateRequirementInput } from '../validation/requirements';
@@ -46,11 +48,6 @@ export async function listRequirements(
   filters: { opportunityId?: string; applicationId?: string },
   query: { cursor?: string | null; limit?: string | number | null; order?: 'asc' | 'desc' },
 ): Promise<PaginatedResult<HydratedDocument<RequirementDoc>>> {
-  if (!filters.opportunityId && !filters.applicationId) {
-    throw new BadRequestError(
-      'Provide opportunityId and/or applicationId to list requirements',
-    );
-  }
   if (filters.applicationId) {
     await assertApplicationOwnedByUser(filters.applicationId, userId);
   }
@@ -58,6 +55,19 @@ export async function listRequirements(
   const filter: Record<string, unknown> = {};
   if (filters.opportunityId) filter.opportunityId = filters.opportunityId;
   if (filters.applicationId) filter.applicationId = filters.applicationId;
+
+  if (!filters.opportunityId && !filters.applicationId) {
+    // "All mine" fallback, mirroring `tasks.service.ts#listTasks`'s same
+    // pattern — every requirement attached to one of the caller's own
+    // (live) applications, across every journey. Lets a dashboard compute
+    // every application's requirement-completion progress in one call
+    // instead of one request per application.
+    const journeyIds = (await ApplicationJourney.find({ userId }).select('_id').lean()).map(
+      (j) => j._id as Types.ObjectId,
+    );
+    const liveApplicationIds = await findLiveApplicationIds(journeyIds);
+    filter.applicationId = { $in: liveApplicationIds };
+  }
 
   return paginate(Requirement, {
     filter,

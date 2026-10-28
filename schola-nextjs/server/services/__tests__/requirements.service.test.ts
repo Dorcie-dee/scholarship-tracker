@@ -41,8 +41,9 @@ describe('requirements.service', () => {
       ).rejects.toThrow(BadRequestError);
     });
 
-    it('listRequirements with no filters surfaces as a clean BadRequestError', async () => {
-      await expect(listRequirements(userId, {}, {})).rejects.toThrow(BadRequestError);
+    it('listRequirements with no filters falls back to "all of the caller\'s own" rather than erroring', async () => {
+      const result = await listRequirements(userId, {}, {});
+      expect(result.items).toEqual([]);
     });
 
     it('creates fine when only opportunityId is given (shared catalog data)', async () => {
@@ -173,6 +174,66 @@ describe('requirements.service', () => {
       await expect(findRequirementAccessible(String(requirement._id), userId)).rejects.toThrow(
         NotFoundError,
       );
+    });
+  });
+
+  describe('listRequirements "all mine" fallback (no opportunityId/applicationId given)', () => {
+    it('returns requirements across every one of the caller\'s own applications, in one call', async () => {
+      const appA = await makeApplication();
+      const appB = await makeApplication();
+      await createRequirement(userId, {
+        requirementType: RequirementType.GPA,
+        description: 'GPA >= 3.5',
+        applicationId: String(appA._id),
+      });
+      await createRequirement(userId, {
+        requirementType: RequirementType.LANGUAGE,
+        description: 'IELTS >= 6.5',
+        applicationId: String(appB._id),
+      });
+
+      const result = await listRequirements(userId, {}, {});
+      expect(result.items).toHaveLength(2);
+      const applicationIds = result.items.map((r) => String(r.applicationId)).sort();
+      expect(applicationIds).toEqual([String(appA._id), String(appB._id)].sort());
+    });
+
+    it('never returns another user\'s requirements', async () => {
+      const otherApp = await makeApplication(otherUserId);
+      await createRequirement(otherUserId, {
+        requirementType: RequirementType.GPA,
+        description: 'GPA >= 3.5',
+        applicationId: String(otherApp._id),
+      });
+
+      const result = await listRequirements(userId, {}, {});
+      expect(result.items).toEqual([]);
+    });
+
+    it('excludes requirements belonging to a soft-deleted application', async () => {
+      const application = await makeApplication();
+      await createRequirement(userId, {
+        requirementType: RequirementType.GPA,
+        description: 'GPA >= 3.5',
+        applicationId: String(application._id),
+      });
+      application.deletedAt = new Date();
+      await application.save();
+
+      const result = await listRequirements(userId, {}, {});
+      expect(result.items).toEqual([]);
+    });
+
+    it('excludes opportunity-only requirements not yet attached to any application', async () => {
+      const opportunity = await Opportunity.create({ title: 'Fulbright' });
+      await createRequirement(userId, {
+        requirementType: RequirementType.GPA,
+        description: 'GPA >= 3.5',
+        opportunityId: String(opportunity._id),
+      });
+
+      const result = await listRequirements(userId, {}, {});
+      expect(result.items).toEqual([]);
     });
   });
 });

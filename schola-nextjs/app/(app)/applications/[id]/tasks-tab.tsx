@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { CheckToggle } from '@/components/ui/check-toggle';
 import { Pill } from '@/components/ui/pill';
+import { ConfirmAction } from '@/components/ui/confirm-action';
 import { FieldError, Input, Label, Textarea } from '@/components/ui/form';
 import { cn } from '@/lib/cn';
 import { PencilIcon, PlusIcon, TrashIcon } from '@/components/icons';
@@ -212,21 +213,18 @@ function TaskRow({ applicationId, task }: { applicationId: string; task: Task })
           )}
         </div>
       </div>
-      <RowActions>
-        <button type="button" className={iconButtonClass()} aria-label={`Edit "${task.title}"`} onClick={() => setEditing(true)}>
-          <PencilIcon size={16} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className={iconButtonClass('danger')}
-          aria-label={`Delete "${task.title}"`}
-          onClick={() => {
-            if (window.confirm('Delete this task? This cannot be undone.')) remove.mutate();
-          }}
-        >
-          <TrashIcon size={16} aria-hidden="true" />
-        </button>
-      </RowActions>
+      <ConfirmAction prompt="Delete this task?" disabled={remove.isPending} onConfirm={() => remove.mutate()}>
+        {(startConfirm) => (
+          <RowActions>
+            <button type="button" className={iconButtonClass()} aria-label={`Edit "${task.title}"`} onClick={() => setEditing(true)}>
+              <PencilIcon size={16} aria-hidden="true" />
+            </button>
+            <button type="button" className={iconButtonClass('danger')} aria-label={`Delete "${task.title}"`} onClick={startConfirm}>
+              <TrashIcon size={16} aria-hidden="true" />
+            </button>
+          </RowActions>
+        )}
+      </ConfirmAction>
     </Card>
   );
 }

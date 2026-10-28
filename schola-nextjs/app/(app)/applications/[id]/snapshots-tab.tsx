@@ -7,6 +7,7 @@ import { REQUIREMENT_MET_STATUSES, applicationStatusMeta, formatDate } from '@/l
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Pill } from '@/components/ui/pill';
+import { ConfirmAction } from '@/components/ui/confirm-action';
 import { FieldError, Input, Label } from '@/components/ui/form';
 import { ChevronDownIcon, PlusIcon, TrashIcon } from '@/components/icons';
 import type { ApplicationSnapshot } from './types';
@@ -109,21 +110,18 @@ function SnapshotRow({ applicationId, snapshot }: { applicationId: string; snaps
             {snapshot.supersedesSnapshotId && <span className="text-xs text-ink-faint">Revises an earlier snapshot</span>}
           </div>
         </div>
-        <RowActions>
-          <button type="button" className={iconButtonClass()} aria-label="Create a new revision of this snapshot" onClick={() => setRevising(true)}>
-            <PlusIcon size={16} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className={iconButtonClass('danger')}
-            aria-label="Delete this snapshot"
-            onClick={() => {
-              if (window.confirm('Delete this snapshot? This cannot be undone.')) remove.mutate();
-            }}
-          >
-            <TrashIcon size={16} aria-hidden="true" />
-          </button>
-        </RowActions>
+        <ConfirmAction prompt="Delete this snapshot?" disabled={remove.isPending} onConfirm={() => remove.mutate()}>
+          {(startConfirm) => (
+            <RowActions>
+              <button type="button" className={iconButtonClass()} aria-label="Create a new revision of this snapshot" onClick={() => setRevising(true)}>
+                <PlusIcon size={16} aria-hidden="true" />
+              </button>
+              <button type="button" className={iconButtonClass('danger')} aria-label="Delete this snapshot" onClick={startConfirm}>
+                <TrashIcon size={16} aria-hidden="true" />
+              </button>
+            </RowActions>
+          )}
+        </ConfirmAction>
       </div>
 
       <SnapshotDetails snapshot={snapshot} />

@@ -50,6 +50,13 @@ export const listOpportunitiesQuerySchema = paginationQuerySchema
     opportunityType: z.nativeEnum(OpportunityType).optional(),
     universityId: objectIdField('universityId').optional(),
     programmeId: objectIdField('programmeId').optional(),
+    /**
+     * Comma-separated id list for a bulk "give me exactly these" lookup
+     * (e.g. a dashboard resolving every distinct `opportunityId` its
+     * applications reference in one call instead of one per application).
+     * Parsed/validated in `opportunities.service.ts#listOpportunities`.
+     */
+    ids: z.string().max(2_000).optional(),
   })
   .strict();
 

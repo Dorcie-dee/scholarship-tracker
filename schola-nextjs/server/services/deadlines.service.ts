@@ -1,9 +1,13 @@
-import type { HydratedDocument } from 'mongoose';
+import { Types, type HydratedDocument } from 'mongoose';
 import { Deadline, type DeadlineDoc } from '../models/deadline.model';
+import { Task } from '../models/task.model';
+import { Requirement } from '../models/requirement.model';
+import { ApplicationJourney } from '../models/application-journey.model';
 import { BadRequestError, NotFoundError } from '../lib/http-errors';
 import { paginate, type PaginatedResult } from '../lib/pagination';
 import {
   assertValidObjectId,
+  findLiveApplicationIds,
   findOpportunityOrThrow,
   findOwnedApplicationOrThrow,
 } from './access';
@@ -65,18 +69,47 @@ export async function listDeadlines(
   filters: LinkFields,
   query: { cursor?: string | null; limit?: string | number | null; order?: 'asc' | 'desc' },
 ): Promise<PaginatedResult<HydratedDeadline>> {
-  if (!filters.opportunityId && !filters.applicationId && !filters.taskId && !filters.requirementId) {
-    throw new BadRequestError(
-      'Provide at least one of opportunityId, applicationId, taskId, requirementId to list deadlines',
-    );
-  }
-  await validateAndAuthorizeLinks(userId, filters);
+  const hasFilter = Boolean(
+    filters.opportunityId || filters.applicationId || filters.taskId || filters.requirementId,
+  );
 
-  const filter: Record<string, unknown> = {};
-  if (filters.opportunityId) filter.opportunityId = filters.opportunityId;
-  if (filters.applicationId) filter.applicationId = filters.applicationId;
-  if (filters.taskId) filter.taskId = filters.taskId;
-  if (filters.requirementId) filter.requirementId = filters.requirementId;
+  let filter: Record<string, unknown>;
+
+  if (hasFilter) {
+    await validateAndAuthorizeLinks(userId, filters);
+    filter = {};
+    if (filters.opportunityId) filter.opportunityId = filters.opportunityId;
+    if (filters.applicationId) filter.applicationId = filters.applicationId;
+    if (filters.taskId) filter.taskId = filters.taskId;
+    if (filters.requirementId) filter.requirementId = filters.requirementId;
+  } else {
+    // "All mine" fallback, mirroring `tasks.service.ts#listTasks`'s same
+    // pattern — every deadline reachable from something the caller owns
+    // (an application, a task, or a requirement), across every journey.
+    // Lets a dashboard compute a "due soon" feed in a handful of calls
+    // instead of one request per application.
+    const journeyIds = (await ApplicationJourney.find({ userId }).select('_id').lean()).map(
+      (j) => j._id as Types.ObjectId,
+    );
+    const liveApplicationIds = await findLiveApplicationIds(journeyIds);
+    const [ownedTaskIds, ownedRequirementIds] = await Promise.all([
+      Task.find({ journeyId: { $in: journeyIds } })
+        .select('_id')
+        .lean()
+        .then((rows) => rows.map((r) => r._id as Types.ObjectId)),
+      Requirement.find({ applicationId: { $in: liveApplicationIds } })
+        .select('_id')
+        .lean()
+        .then((rows) => rows.map((r) => r._id as Types.ObjectId)),
+    ]);
+    filter = {
+      $or: [
+        { applicationId: { $in: liveApplicationIds } },
+        { taskId: { $in: ownedTaskIds } },
+        { requirementId: { $in: ownedRequirementIds } },
+      ],
+    };
+  }
 
   return paginate(Deadline, {
     filter,

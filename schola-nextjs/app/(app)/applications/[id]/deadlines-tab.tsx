@@ -7,6 +7,7 @@ import { deadlineStatusMeta, formatDate, relativeDays } from '@/lib/status';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Pill } from '@/components/ui/pill';
+import { ConfirmAction } from '@/components/ui/confirm-action';
 import { FieldError, Input, Label, Textarea } from '@/components/ui/form';
 import { cn } from '@/lib/cn';
 import { PencilIcon, PlusIcon, TrashIcon } from '@/components/icons';
@@ -203,21 +204,18 @@ function DeadlineRow({ applicationId, deadline }: { applicationId: string; deadl
         </div>
         {deadline.notes && <p className="mt-2 text-sm text-ink-soft">{deadline.notes}</p>}
       </div>
-      <RowActions>
-        <button type="button" className={iconButtonClass()} aria-label={`Edit "${deadline.label}"`} onClick={() => setEditing(true)}>
-          <PencilIcon size={16} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className={iconButtonClass('danger')}
-          aria-label={`Delete "${deadline.label}"`}
-          onClick={() => {
-            if (window.confirm('Delete this deadline? This cannot be undone.')) remove.mutate();
-          }}
-        >
-          <TrashIcon size={16} aria-hidden="true" />
-        </button>
-      </RowActions>
+      <ConfirmAction prompt="Delete this deadline?" disabled={remove.isPending} onConfirm={() => remove.mutate()}>
+        {(startConfirm) => (
+          <RowActions>
+            <button type="button" className={iconButtonClass()} aria-label={`Edit "${deadline.label}"`} onClick={() => setEditing(true)}>
+              <PencilIcon size={16} aria-hidden="true" />
+            </button>
+            <button type="button" className={iconButtonClass('danger')} aria-label={`Delete "${deadline.label}"`} onClick={startConfirm}>
+              <TrashIcon size={16} aria-hidden="true" />
+            </button>
+          </RowActions>
+        )}
+      </ConfirmAction>
     </Card>
   );
 }

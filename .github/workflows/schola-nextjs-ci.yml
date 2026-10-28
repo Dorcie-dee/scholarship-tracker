@@ -1,0 +1,52 @@
+name: schola-nextjs CI
+
+# Scoped to this one app (a sibling of backend/ and frontend/ in this repo)
+# so unrelated changes elsewhere don't trigger it. Runs on every push and
+# PR; no deploy step — this is purely "does it still type-check, pass its
+# tests, and build," which until now only ever happened when someone
+# remembered to run it by hand.
+on:
+  push:
+    paths:
+      - 'schola-nextjs/**'
+      - '.github/workflows/schola-nextjs-ci.yml'
+  pull_request:
+    paths:
+      - 'schola-nextjs/**'
+      - '.github/workflows/schola-nextjs-ci.yml'
+
+defaults:
+  run:
+    working-directory: schola-nextjs
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'yarn'
+          cache-dependency-path: schola-nextjs/yarn.lock
+
+      # mongodb-memory-server (used by the test suite) downloads a real
+      # MongoDB binary on first use — cached across runs so CI doesn't
+      # re-download it every time.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: yarn test
+
+      - name: Build
+        run: yarn build

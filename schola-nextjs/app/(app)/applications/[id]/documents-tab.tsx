@@ -7,6 +7,7 @@ import { formatDate } from '@/lib/status';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Pill } from '@/components/ui/pill';
+import { ConfirmAction } from '@/components/ui/confirm-action';
 import { FieldError, Input, Label, Textarea } from '@/components/ui/form';
 import { DownloadIcon, FileIcon, PlusIcon, TrashIcon, UploadIcon } from '@/components/icons';
 import {
@@ -207,27 +208,34 @@ function DocumentRow({ applicationId, link }: { applicationId: string; link: App
         {link.label && <p className="mt-1 text-xs text-ink-soft">Role: {link.label}</p>}
         {downloadError && <p className="mt-1 text-xs font-medium text-danger">{downloadError}</p>}
       </div>
-      <RowActions>
-        <button
-          type="button"
-          className={iconButtonClass()}
-          aria-label={`Download "${doc?.title ?? 'document'}"`}
-          onClick={() => download.mutate()}
-          disabled={download.isPending || !doc}
-        >
-          <DownloadIcon size={16} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className={iconButtonClass('danger')}
-          aria-label={`Detach "${doc?.title ?? 'document'}"`}
-          onClick={() => {
-            if (window.confirm('Detach this document from the application? The file itself is kept in your documents.')) detach.mutate();
-          }}
-        >
-          <TrashIcon size={16} aria-hidden="true" />
-        </button>
-      </RowActions>
+      <ConfirmAction
+        prompt="Detach this document? The file itself is kept in your documents."
+        confirmLabel="Detach"
+        disabled={detach.isPending}
+        onConfirm={() => detach.mutate()}
+      >
+        {(startConfirm) => (
+          <RowActions>
+            <button
+              type="button"
+              className={iconButtonClass()}
+              aria-label={`Download "${doc?.title ?? 'document'}"`}
+              onClick={() => download.mutate()}
+              disabled={download.isPending || !doc}
+            >
+              <DownloadIcon size={16} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className={iconButtonClass('danger')}
+              aria-label={`Detach "${doc?.title ?? 'document'}"`}
+              onClick={startConfirm}
+            >
+              <TrashIcon size={16} aria-hidden="true" />
+            </button>
+          </RowActions>
+        )}
+      </ConfirmAction>
     </Card>
   );
 }
