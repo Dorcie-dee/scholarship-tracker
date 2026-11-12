@@ -7,14 +7,15 @@ import {
   assertApplicationOwnedByUser,
   assertValidObjectId,
   findLiveApplicationIds,
-  findOpportunityOrThrow,
+  findOwnedOpportunityOrThrow,
 } from './access';
+import { Opportunity } from '../models/opportunity.model';
 import type { CreateRequirementInput, UpdateRequirementInput } from '../validation/requirements';
 
 /**
  * Ported from `requirements/requirements.service.ts`. A Requirement can be
- * scoped to an Opportunity (shared catalog data — no ownership check), an
- * Application (user-owned — ownership enforced via `access.ts`), or both.
+ * scoped to an Opportunity (personal workspace data — ownership enforced via
+ * `access.ts`), an Application (also user-owned), or both.
  */
 
 export async function createRequirement(
@@ -27,7 +28,7 @@ export async function createRequirement(
     );
   }
   if (input.opportunityId) {
-    await findOpportunityOrThrow(input.opportunityId);
+    await findOwnedOpportunityOrThrow(input.opportunityId, userId);
   }
   if (input.applicationId) {
     await assertApplicationOwnedByUser(input.applicationId, userId);
@@ -58,15 +59,26 @@ export async function listRequirements(
 
   if (!filters.opportunityId && !filters.applicationId) {
     // "All mine" fallback, mirroring `tasks.service.ts#listTasks`'s same
-    // pattern — every requirement attached to one of the caller's own
-    // (live) applications, across every journey. Lets a dashboard compute
-    // every application's requirement-completion progress in one call
-    // instead of one request per application.
-    const journeyIds = (await ApplicationJourney.find({ userId }).select('_id').lean()).map(
-      (j) => j._id as Types.ObjectId,
-    );
+    // pattern — every requirement attached to one of the caller's own (live)
+    // applications OR one of the caller's own opportunities, across every
+    // journey. Lets a dashboard compute every application's
+    // requirement-completion progress in one call instead of one request
+    // per application.
+    const [journeyIds, ownedOpportunityIds] = await Promise.all([
+      ApplicationJourney.find({ userId })
+        .select('_id')
+        .lean()
+        .then((rows) => rows.map((j) => j._id as Types.ObjectId)),
+      Opportunity.find({ ownerId: userId })
+        .select('_id')
+        .lean()
+        .then((rows) => rows.map((o) => o._id as Types.ObjectId)),
+    ]);
     const liveApplicationIds = await findLiveApplicationIds(journeyIds);
-    filter.applicationId = { $in: liveApplicationIds };
+    filter.$or = [
+      { applicationId: { $in: liveApplicationIds } },
+      { opportunityId: { $in: ownedOpportunityIds } },
+    ];
   }
 
   return paginate(Requirement, {
@@ -99,6 +111,8 @@ export async function findRequirementAccessible(
   const requirement = await findRequirementEntityOrThrow(id);
   if (requirement.applicationId) {
     await assertApplicationOwnedByUser(String(requirement.applicationId), userId);
+  } else if (requirement.opportunityId) {
+    await findOwnedOpportunityOrThrow(String(requirement.opportunityId), userId);
   }
   return requirement;
 }
@@ -110,7 +124,7 @@ export async function updateRequirement(
 ): Promise<HydratedDocument<RequirementDoc>> {
   const requirement = await findRequirementAccessible(id, userId);
   if (input.opportunityId) {
-    await findOpportunityOrThrow(input.opportunityId);
+    await findOwnedOpportunityOrThrow(input.opportunityId, userId);
   }
   if (input.applicationId) {
     await assertApplicationOwnedByUser(input.applicationId, userId);

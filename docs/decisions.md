@@ -37,17 +37,33 @@ this defends against.
 `AuthService.purgeExpiredSessions()` exists but nothing calls it on a timer. Fine at this scale; add
 a cron trigger (or a `@nestjs/schedule` job) once the table's growth is actually worth managing.
 
-## Catalog data vs. owned data
+## Catalog data vs. owned data (superseded)
 
-Universities, Programmes, Opportunities, and OpportunitySources are shared reference/catalog data —
-any authenticated user can read and write them, with no per-user ownership column. Journeys,
+~~Universities, Programmes, Opportunities, and OpportunitySources are shared reference/catalog
+data — any authenticated user can read and write them, with no per-user ownership column. Journeys,
 Applications, Tasks, and Documents are owned by the user who created them. Requirements and
-Deadlines can go either way depending on what they're attached to (see `domain-model.md`).
+Deadlines can go either way depending on what they're attached to (see `domain-model.md`).~~
 
-**Why:** this is a personal tool, not a multi-tenant SaaS product (yet). Modeling universities as
+~~**Why:** this is a personal tool, not a multi-tenant SaaS product (yet). Modeling universities as
 "owned" by whichever user first entered them would be actively wrong — the same University of Twente
 row should be shared and reused, not duplicated per user. If this ever becomes a shared product
-across unrelated users, catalog data would need moderation/versioning, not ownership.
+across unrelated users, catalog data would need moderation/versioning, not ownership.~~
+
+**Superseded** (schola-nextjs rewrite, product-direction correction): the "personal tool" premise
+above stopped being true the moment real multi-user auth/roles shipped — at that point "any
+authenticated user can read and write" every University/Programme/Opportunity stopped being a
+convenience and became one user reading and silently overwriting another's data. More fundamentally,
+the product itself was never meant to be a scholarship-discovery platform with an admin-curated
+catalog for users to browse; it's a personal application-management workspace into which each user
+brings their own opportunities. Universities, Programmes, Opportunities, and OpportunitySources are
+now **owned data**, exactly like Journeys/Applications/Tasks/Documents — each carries an `ownerId`,
+every list/read/write is scoped to it, and mutation is gated by ownership instead of an ADMIN role.
+`createUniversity`/`createProgramme` reuse an existing same-named row for the same owner instead of
+duplicating it (the one piece of the old "don't duplicate University of Twente" concern worth
+keeping — just scoped per-owner instead of globally). The admin console's catalog-curation tabs were
+removed accordingly; only user-role management remains an admin function. See schola-nextjs's
+`server/models/{university,programme,opportunity,opportunity-source}.model.ts` and
+`server/services/access.ts`'s `findOwned*OrThrow` helpers.
 
 ## Two independent FKs instead of a join model (Requirement, Deadline)
 

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { AlertCircleIcon } from '@/components/icons';
+import { iconButtonVariants } from '@/components/ui/button';
 
 /** Small inline spinner — same visual language as `AppShell`'s full-page one, scaled down for in-panel use. */
 export function Spinner({ label }: { label: string }) {
@@ -29,8 +30,7 @@ export function RowActions({ children }: { children: ReactNode }) {
   return <div className="flex flex-none items-center gap-1">{children}</div>;
 }
 
+/** Thin alias over the shared `iconButtonVariants()` — kept so the five tab files importing this don't need to change. */
 export function iconButtonClass(tone: 'neutral' | 'danger' = 'neutral'): string {
-  return tone === 'danger'
-    ? 'flex h-8 w-8 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-danger-soft hover:text-danger'
-    : 'flex h-8 w-8 items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-line-soft hover:text-ink';
+  return iconButtonVariants({ tone });
 }

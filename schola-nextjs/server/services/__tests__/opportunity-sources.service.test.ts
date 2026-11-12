@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Types } from 'mongoose';
 import { Opportunity } from '../../models/opportunity.model';
 import { OpportunitySource } from '../../models/opportunity-source.model';
 import { ContentOrigin, OpportunitySourceType } from '../../lib/enums';
@@ -22,6 +23,9 @@ import {
 } from '../opportunity-sources.service';
 
 const mockedFetchUrlPreview = vi.mocked(fetchUrlPreview);
+
+const ownerId = new Types.ObjectId().toString();
+const otherOwnerId = new Types.ObjectId().toString();
 
 function stubPreview(overrides: Partial<FetchedUrlPreview> = {}): FetchedUrlPreview {
   return {
@@ -51,27 +55,35 @@ describe('opportunity-sources.service', () => {
   describe('createOpportunitySource', () => {
     it('validates the opportunity exists before creating the source', async () => {
       await expect(
-        createOpportunitySource({ opportunityId: '507f1f77bcf86cd799439011' }),
+        createOpportunitySource(ownerId, { opportunityId: '507f1f77bcf86cd799439011' }),
       ).rejects.toThrow(NotFoundError);
       expect(await OpportunitySource.countDocuments()).toBe(0);
     });
 
+    it('rejects an opportunity owned by someone else', async () => {
+      const opportunity = await Opportunity.create({ ownerId: otherOwnerId, title: 'Theirs' });
+      await expect(
+        createOpportunitySource(ownerId, { opportunityId: String(opportunity._id) }),
+      ).rejects.toThrow(NotFoundError);
+    });
+
     it('defaults capturedAt to now and contentOrigin to manual when autoFetch is not set', async () => {
-      const opportunity = await Opportunity.create({ title: 'Fulbright Scholarship' });
+      const opportunity = await Opportunity.create({ ownerId, title: 'Fulbright Scholarship' });
       const before = Date.now();
 
-      const source = await createOpportunitySource({ opportunityId: String(opportunity._id) });
+      const source = await createOpportunitySource(ownerId, { opportunityId: String(opportunity._id) });
 
       expect(source.capturedAt.getTime()).toBeGreaterThanOrEqual(before);
       expect(source.contentOrigin).toBe(ContentOrigin.MANUAL);
+      expect(String(source.ownerId)).toBe(ownerId);
       expect(mockedFetchUrlPreview).not.toHaveBeenCalled();
     });
 
     it('autoFetch fills empty fields and sets contentOrigin=fetched', async () => {
-      const opportunity = await Opportunity.create({ title: 'Fulbright Scholarship' });
+      const opportunity = await Opportunity.create({ ownerId, title: 'Fulbright Scholarship' });
       mockedFetchUrlPreview.mockResolvedValueOnce(stubPreview());
 
-      const source = await createOpportunitySource({
+      const source = await createOpportunitySource(ownerId, {
         opportunityId: String(opportunity._id),
         sourceUrl: 'https://example.test/scholarship',
         autoFetch: true,
@@ -84,10 +96,10 @@ describe('opportunity-sources.service', () => {
     });
 
     it('autoFetch never overwrites user-supplied content', async () => {
-      const opportunity = await Opportunity.create({ title: 'Fulbright Scholarship' });
+      const opportunity = await Opportunity.create({ ownerId, title: 'Fulbright Scholarship' });
       mockedFetchUrlPreview.mockResolvedValueOnce(stubPreview());
 
-      const source = await createOpportunitySource({
+      const source = await createOpportunitySource(ownerId, {
         opportunityId: String(opportunity._id),
         sourceUrl: 'https://example.test/scholarship',
         sourceName: 'My title',
@@ -101,17 +113,17 @@ describe('opportunity-sources.service', () => {
     });
 
     it('rejects autoFetch without a sourceUrl', async () => {
-      const opportunity = await Opportunity.create({ title: 'Fulbright Scholarship' });
+      const opportunity = await Opportunity.create({ ownerId, title: 'Fulbright Scholarship' });
       await expect(
-        createOpportunitySource({ opportunityId: String(opportunity._id), autoFetch: true }),
+        createOpportunitySource(ownerId, { opportunityId: String(opportunity._id), autoFetch: true }),
       ).rejects.toThrow(BadRequestError);
       expect(mockedFetchUrlPreview).not.toHaveBeenCalled();
     });
 
     it('autoFetch never creates an Opportunity', async () => {
-      const opportunity = await Opportunity.create({ title: 'Fulbright Scholarship' });
+      const opportunity = await Opportunity.create({ ownerId, title: 'Fulbright Scholarship' });
       mockedFetchUrlPreview.mockResolvedValueOnce(stubPreview());
-      await createOpportunitySource({
+      await createOpportunitySource(ownerId, {
         opportunityId: String(opportunity._id),
         sourceUrl: 'https://example.test/scholarship',
         autoFetch: true,
@@ -121,71 +133,106 @@ describe('opportunity-sources.service', () => {
   });
 
   describe('listOpportunitySources', () => {
+    it('only returns sources owned by the caller', async () => {
+      const mine = await Opportunity.create({ ownerId, title: 'Mine' });
+      const theirs = await Opportunity.create({ ownerId: otherOwnerId, title: 'Theirs' });
+      await OpportunitySource.create({ ownerId, opportunityId: mine._id, capturedAt: new Date() });
+      await OpportunitySource.create({ ownerId: otherOwnerId, opportunityId: theirs._id, capturedAt: new Date() });
+
+      const result = await listOpportunitySources(ownerId, {});
+      expect(result.items).toHaveLength(1);
+      expect(String(result.items[0].opportunityId)).toBe(String(mine._id));
+    });
+
     it('filters by opportunityId and orders newest-first', async () => {
-      const oppA = await Opportunity.create({ title: 'A' });
-      const oppB = await Opportunity.create({ title: 'B' });
+      const oppA = await Opportunity.create({ ownerId, title: 'A' });
+      const oppB = await Opportunity.create({ ownerId, title: 'B' });
       await OpportunitySource.create({
+        ownerId,
         opportunityId: oppA._id,
         capturedAt: new Date('2026-01-01T00:00:00Z'),
         sourceType: OpportunitySourceType.MANUAL_ENTRY,
       });
       const newer = await OpportunitySource.create({
+        ownerId,
         opportunityId: oppA._id,
         capturedAt: new Date('2026-02-01T00:00:00Z'),
         sourceType: OpportunitySourceType.MANUAL_ENTRY,
       });
-      await OpportunitySource.create({ opportunityId: oppB._id, capturedAt: new Date() });
+      await OpportunitySource.create({ ownerId, opportunityId: oppB._id, capturedAt: new Date() });
 
-      const result = await listOpportunitySources({ opportunityId: String(oppA._id) });
+      const result = await listOpportunitySources(ownerId, { opportunityId: String(oppA._id) });
       expect(result.items).toHaveLength(2);
       expect(String(result.items[0]._id)).toBe(String(newer._id));
     });
   });
 
   describe('getOpportunitySourceOrThrow', () => {
+    it('throws NotFoundError for a source owned by someone else', async () => {
+      const opportunity = await Opportunity.create({ ownerId: otherOwnerId, title: 'Theirs' });
+      const source = await OpportunitySource.create({
+        ownerId: otherOwnerId,
+        opportunityId: opportunity._id,
+        capturedAt: new Date(),
+      });
+      await expect(getOpportunitySourceOrThrow(String(source._id), ownerId)).rejects.toThrow(NotFoundError);
+    });
+
     it('throws NotFoundError for a missing id', async () => {
-      await expect(getOpportunitySourceOrThrow('507f1f77bcf86cd799439011')).rejects.toThrow(NotFoundError);
+      await expect(getOpportunitySourceOrThrow('507f1f77bcf86cd799439011', ownerId)).rejects.toThrow(
+        NotFoundError,
+      );
     });
   });
 
   describe('updateOpportunitySource — re-parenting validation', () => {
     it('validates a newly supplied opportunityId before applying the update', async () => {
-      const opp = await Opportunity.create({ title: 'A' });
-      const source = await OpportunitySource.create({ opportunityId: opp._id, capturedAt: new Date() });
+      const opp = await Opportunity.create({ ownerId, title: 'A' });
+      const source = await OpportunitySource.create({ ownerId, opportunityId: opp._id, capturedAt: new Date() });
 
       await expect(
-        updateOpportunitySource(String(source._id), { opportunityId: '507f1f77bcf86cd799439011' }),
+        updateOpportunitySource(String(source._id), ownerId, { opportunityId: '507f1f77bcf86cd799439011' }),
       ).rejects.toThrow(NotFoundError);
     });
 
-    it('re-parents to a valid, different opportunity', async () => {
-      const oppA = await Opportunity.create({ title: 'A' });
-      const oppB = await Opportunity.create({ title: 'B' });
-      const source = await OpportunitySource.create({ opportunityId: oppA._id, capturedAt: new Date() });
+    it('rejects re-parenting to an opportunity owned by someone else', async () => {
+      const opp = await Opportunity.create({ ownerId, title: 'A' });
+      const theirs = await Opportunity.create({ ownerId: otherOwnerId, title: 'Theirs' });
+      const source = await OpportunitySource.create({ ownerId, opportunityId: opp._id, capturedAt: new Date() });
 
-      const updated = await updateOpportunitySource(String(source._id), { opportunityId: String(oppB._id) });
+      await expect(
+        updateOpportunitySource(String(source._id), ownerId, { opportunityId: String(theirs._id) }),
+      ).rejects.toThrow(NotFoundError);
+    });
+
+    it('re-parents to a valid, different opportunity owned by the caller', async () => {
+      const oppA = await Opportunity.create({ ownerId, title: 'A' });
+      const oppB = await Opportunity.create({ ownerId, title: 'B' });
+      const source = await OpportunitySource.create({ ownerId, opportunityId: oppA._id, capturedAt: new Date() });
+
+      const updated = await updateOpportunitySource(String(source._id), ownerId, { opportunityId: String(oppB._id) });
       expect(String(updated.opportunityId)).toBe(String(oppB._id));
     });
 
     it('does not re-validate opportunityId when the update does not touch it', async () => {
-      const opp = await Opportunity.create({ title: 'A' });
-      const source = await OpportunitySource.create({ opportunityId: opp._id, capturedAt: new Date() });
+      const opp = await Opportunity.create({ ownerId, title: 'A' });
+      const source = await OpportunitySource.create({ ownerId, opportunityId: opp._id, capturedAt: new Date() });
 
-      const updated = await updateOpportunitySource(String(source._id), { sourceName: 'Newsletter' });
+      const updated = await updateOpportunitySource(String(source._id), ownerId, { sourceName: 'Newsletter' });
       expect(updated.sourceName).toBe('Newsletter');
     });
   });
 
   describe('deleteOpportunitySource', () => {
-    it('deletes an existing source', async () => {
-      const opp = await Opportunity.create({ title: 'A' });
-      const source = await OpportunitySource.create({ opportunityId: opp._id, capturedAt: new Date() });
-      await deleteOpportunitySource(String(source._id));
+    it('deletes an existing source owned by the caller', async () => {
+      const opp = await Opportunity.create({ ownerId, title: 'A' });
+      const source = await OpportunitySource.create({ ownerId, opportunityId: opp._id, capturedAt: new Date() });
+      await deleteOpportunitySource(String(source._id), ownerId);
       expect(await OpportunitySource.findById(source._id)).toBeNull();
     });
 
     it('throws NotFoundError instead of deleting nothing when missing', async () => {
-      await expect(deleteOpportunitySource('507f1f77bcf86cd799439011')).rejects.toThrow(NotFoundError);
+      await expect(deleteOpportunitySource('507f1f77bcf86cd799439011', ownerId)).rejects.toThrow(NotFoundError);
     });
   });
 });

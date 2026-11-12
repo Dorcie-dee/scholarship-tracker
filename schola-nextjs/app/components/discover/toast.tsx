@@ -2,11 +2,11 @@
 
 import { useEffect } from 'react';
 import { cn } from '@/lib/cn';
-import { AlertCircleIcon, CheckIcon } from '@/components/icons';
+import { AlertCircleIcon, CheckIcon, SparklesIcon } from '@/components/icons';
 
 export interface ToastState {
   message: string;
-  tone: 'success' | 'error';
+  tone: 'success' | 'error' | 'info';
 }
 
 /**
@@ -24,7 +24,7 @@ export function Toast({ toast, onDismiss }: { toast: ToastState | null; onDismis
 
   if (!toast) return null;
 
-  const Icon = toast.tone === 'success' ? CheckIcon : AlertCircleIcon;
+  const Icon = toast.tone === 'success' ? CheckIcon : toast.tone === 'info' ? SparklesIcon : AlertCircleIcon;
 
   return (
     <div
@@ -35,7 +35,9 @@ export function Toast({ toast, onDismiss }: { toast: ToastState | null; onDismis
       <span
         className={cn(
           'mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full',
-          toast.tone === 'success' ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger',
+          toast.tone === 'success' && 'bg-success-soft text-success',
+          toast.tone === 'info' && 'bg-info-soft text-info',
+          toast.tone === 'error' && 'bg-danger-soft text-danger',
         )}
       >
         <Icon size={13} aria-hidden="true" />

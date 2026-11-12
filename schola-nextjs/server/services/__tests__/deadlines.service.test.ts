@@ -34,7 +34,7 @@ describe('deadlines.service', () => {
     });
 
     it('creates fine when exactly one FK field (opportunityId) is given', async () => {
-      const opportunity = await Opportunity.create({ title: 'Fulbright' });
+      const opportunity = await Opportunity.create({ ownerId: userId, title: 'Fulbright' });
       const deadline = await createDeadline(userId, {
         label: 'Application opens',
         date: new Date().toISOString(),
@@ -87,7 +87,7 @@ describe('deadlines.service', () => {
 
   describe('get/update/list', () => {
     it('round-trips through findDeadlineAccessible and updateDeadline', async () => {
-      const opportunity = await Opportunity.create({ title: 'Fulbright' });
+      const opportunity = await Opportunity.create({ ownerId: userId, title: 'Fulbright' });
       const deadline = await createDeadline(userId, {
         label: 'Application opens',
         date: new Date('2026-01-01').toISOString(),
@@ -102,8 +102,8 @@ describe('deadlines.service', () => {
     });
 
     it('lists deadlines filtered by opportunityId', async () => {
-      const opportunity = await Opportunity.create({ title: 'Fulbright' });
-      const otherOpportunity = await Opportunity.create({ title: 'Other' });
+      const opportunity = await Opportunity.create({ ownerId: userId, title: 'Fulbright' });
+      const otherOpportunity = await Opportunity.create({ ownerId: userId, title: 'Other' });
       await createDeadline(userId, {
         label: 'A',
         date: new Date().toISOString(),
@@ -169,8 +169,8 @@ describe('deadlines.service', () => {
       expect(result.items).toEqual([]);
     });
 
-    it('excludes a catalog-only, opportunity-scoped deadline (not reachable via anything the caller owns)', async () => {
-      const opportunity = await Opportunity.create({ title: 'Fulbright' });
+    it('includes an opportunity-scoped deadline for an opportunity the caller owns', async () => {
+      const opportunity = await Opportunity.create({ ownerId: userId, title: 'Fulbright' });
       await createDeadline(userId, {
         label: 'Opportunity-only',
         date: new Date().toISOString(),
@@ -178,7 +178,43 @@ describe('deadlines.service', () => {
       });
 
       const result = await listDeadlines(userId, {}, {});
+      expect(result.items.map((d) => d.label)).toEqual(['Opportunity-only']);
+    });
+
+    it('excludes an opportunity-scoped deadline belonging to another user\'s opportunity', async () => {
+      const otherOpportunity = await Opportunity.create({ ownerId: otherUserId, title: 'Theirs' });
+      await createDeadline(otherUserId, {
+        label: 'Not mine',
+        date: new Date().toISOString(),
+        opportunityId: String(otherOpportunity._id),
+      });
+
+      const result = await listDeadlines(userId, {}, {});
       expect(result.items).toEqual([]);
+    });
+  });
+
+  describe('opportunity link ownership', () => {
+    it('404s creating a deadline against an opportunity owned by another user', async () => {
+      const opportunity = await Opportunity.create({ ownerId: otherUserId, title: 'Theirs' });
+      await expect(
+        createDeadline(userId, {
+          label: 'Not mine',
+          date: new Date().toISOString(),
+          opportunityId: String(opportunity._id),
+        }),
+      ).rejects.toThrow(NotFoundError);
+    });
+
+    it('404s fetching a deadline whose opportunity is owned by another user', async () => {
+      const opportunity = await Opportunity.create({ ownerId: userId, title: 'Fulbright' });
+      const deadline = await createDeadline(userId, {
+        label: 'Opportunity-only',
+        date: new Date().toISOString(),
+        opportunityId: String(opportunity._id),
+      });
+
+      await expect(findDeadlineAccessible(String(deadline._id), otherUserId)).rejects.toThrow(NotFoundError);
     });
   });
 });

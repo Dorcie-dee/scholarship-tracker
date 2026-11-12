@@ -34,7 +34,7 @@ export default function ForgotPasswordPage() {
           <MailIcon size={22} aria-hidden="true" />
         </span>
         <div>
-          <h1 className="font-display text-2xl font-semibold text-ink">Check your email</h1>
+          <h1 className="font-display text-page-title font-semibold text-ink">Check your email</h1>
           <p className="mt-2 text-sm text-ink-soft">
             If an account exists for <span className="font-semibold text-ink">{email}</span>, we&rsquo;ve sent
             instructions to reset your password.
@@ -50,7 +50,7 @@ export default function ForgotPasswordPage() {
   return (
     <div className="flex flex-col gap-7">
       <div>
-        <h1 className="font-display text-2xl font-semibold text-ink">Reset your password</h1>
+        <h1 className="font-display text-page-title font-semibold text-ink">Reset your password</h1>
         <p className="mt-1.5 text-sm text-ink-soft">
           Enter the email on your account and we&rsquo;ll send you a link to reset it.
         </p>

@@ -61,7 +61,7 @@ export function OpportunityCard({
         {opportunity.field && <Pill tone="neutral">{opportunity.field}</Pill>}
       </div>
 
-      <h2 className="mt-3 font-display text-lg font-semibold leading-snug text-ink">{opportunity.title}</h2>
+      <h2 className="mt-3 font-display text-card-title font-semibold leading-snug text-ink">{opportunity.title}</h2>
 
       {placeLine && (
         <p className="mt-1.5 flex items-center gap-1.5 text-sm text-ink-soft">

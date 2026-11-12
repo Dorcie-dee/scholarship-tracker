@@ -25,6 +25,7 @@ interface AuthContextValue {
   status: AuthStatus;
   login: (email: string, password: string) => Promise<AuthUser>;
   register: (name: string | undefined, email: string, password: string) => Promise<AuthUser>;
+  setupAdmin: (name: string | undefined, email: string, password: string, setupSecret: string) => Promise<AuthUser>;
   logout: () => Promise<void>;
   /** Re-reads the current user onto context, e.g. after email verification. */
   setUser: (user: AuthUser) => void;
@@ -86,6 +87,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return data.user;
   }, []);
 
+  const setupAdmin = useCallback(
+    async (name: string | undefined, email: string, password: string, setupSecret: string) => {
+      const data = await apiFetch<AuthTokenResponse>('/auth/setup-admin', {
+        method: 'POST',
+        body: name ? { name, email, password, setupSecret } : { email, password, setupSecret },
+        skipAuthRetry: true,
+      });
+      setAccessToken(data.accessToken, data.accessTokenExpiresAt);
+      setUserState(data.user);
+      setStatus('authenticated');
+      return data.user;
+    },
+    [],
+  );
+
   const logout = useCallback(async () => {
     try {
       await apiFetch('/auth/logout', { method: 'POST', skipAuthRetry: true });
@@ -99,8 +115,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const setUser = useCallback((next: AuthUser) => setUserState(next), []);
 
   const value = useMemo(
-    () => ({ user, status, login, register, logout, setUser }),
-    [user, status, login, register, logout, setUser],
+    () => ({ user, status, login, register, setupAdmin, logout, setUser }),
+    [user, status, login, register, setupAdmin, logout, setUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -44,9 +44,3 @@ export function EmptyState({ label }: { label: string }) {
     </div>
   );
 }
-
-export const ACTION_ICON_BUTTON =
-  'flex h-8 w-8 items-center justify-center rounded-md text-ink-faint hover:bg-line-soft hover:text-ink disabled:pointer-events-none disabled:opacity-40';
-
-export const DANGER_ICON_BUTTON =
-  'flex h-8 w-8 items-center justify-center rounded-md text-ink-faint hover:bg-danger-soft hover:text-danger disabled:pointer-events-none disabled:opacity-40';

@@ -33,7 +33,7 @@ export default function LoginPage() {
   return (
     <div className="flex flex-col gap-7">
       <div>
-        <h1 className="font-display text-2xl font-semibold text-ink">Welcome back</h1>
+        <h1 className="font-display text-page-title font-semibold text-ink">Welcome back</h1>
         <p className="mt-1.5 text-sm text-ink-soft">Log in to pick up right where you left off.</p>
       </div>
 

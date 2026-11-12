@@ -42,11 +42,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col bg-paper lg:flex-row">
+    <div className="flex min-h-dvh flex-col bg-paper md:flex-row">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         {user && !user.isVerified && <VerifyBanner />}
-        <main className="min-w-0 flex-1">{children}</main>
+        {/* Bottom padding clears the fixed mobile bottom nav below `md` — see
+            `Sidebar`'s `BottomNav`. */}
+        <main className="min-w-0 flex-1 pb-16 md:pb-0">{children}</main>
       </div>
     </div>
   );

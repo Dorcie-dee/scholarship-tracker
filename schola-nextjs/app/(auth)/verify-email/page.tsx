@@ -68,7 +68,7 @@ export default function VerifyEmailPage() {
           <MailIcon size={22} aria-hidden="true" />
         </span>
         <div>
-          <h1 className="font-display text-2xl font-semibold text-ink">Verify your email</h1>
+          <h1 className="font-display text-page-title font-semibold text-ink">Verify your email</h1>
           <p className="mt-2 text-sm text-ink-soft">
             We sent a 6-digit code to <span className="font-semibold text-ink">{user?.email}</span>.
           </p>

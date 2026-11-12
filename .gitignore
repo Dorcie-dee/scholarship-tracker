@@ -5,3 +5,5 @@ README.md
 Claude Terminal — Initial Scholarship OS Foundation Build Prompt.md
 
 .DS_Store
+.env
+seed.ts

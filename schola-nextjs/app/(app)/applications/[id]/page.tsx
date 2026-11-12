@@ -181,6 +181,18 @@ export default function ApplicationDetailPage() {
     </Link>
   );
 
+  const breadcrumb = application && (
+    <nav aria-label="Breadcrumb" className="mt-4 flex items-center gap-1.5 text-sm text-ink-faint">
+      <Link href="/applications" className="font-medium hover:text-ink-soft">
+        Applications
+      </Link>
+      <span aria-hidden="true">/</span>
+      <span className="truncate font-medium text-ink-soft" aria-current="page">
+        {application.title}
+      </span>
+    </nav>
+  );
+
   if (applicationQuery.isLoading) {
     return (
       <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
@@ -206,7 +218,7 @@ export default function ApplicationDetailPage() {
       <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
         {backLink}
         <Card className="mt-6 flex flex-col items-start gap-3 p-6">
-          <h1 className="font-display text-2xl font-semibold text-ink">{application.title}</h1>
+          <h1 className="font-display text-page-title font-semibold text-ink">{application.title}</h1>
           <p className="text-sm text-ink-soft">
             This application has been deleted. You can restore it any time before it's permanently removed, or leave it be.
           </p>
@@ -227,12 +239,12 @@ export default function ApplicationDetailPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
-      {backLink}
+      {breadcrumb}
 
       <header className="mt-4 flex flex-col gap-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="font-display text-3xl font-semibold text-ink">{application.title}</h1>
+            <h1 className="font-display text-page-title font-semibold text-ink sm:text-page-title-lg">{application.title}</h1>
             {opportunityId && opportunityQuery.data && (
               <p className="mt-1 text-sm text-ink-soft">
                 {opportunityQuery.data.title}
@@ -296,7 +308,12 @@ export default function ApplicationDetailPage() {
       </header>
 
       <div className="mt-6">
-        <div role="tablist" aria-label="Application sections" className="flex gap-1 overflow-x-auto border-b border-line">
+        <div
+          role="tablist"
+          aria-label="Application sections"
+          className="scrollbar-thin flex gap-1 overflow-x-auto border-b border-line px-1"
+          style={{ scrollPaddingInline: '0.5rem' }}
+        >
           {TABS.map((tab, index) => (
             <button
               key={tab.id}

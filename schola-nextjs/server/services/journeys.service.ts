@@ -33,9 +33,11 @@ export async function createJourney(
   dto: CreateJourneyInput,
 ): Promise<JourneyDocument> {
   // Independent checks — neither depends on the other's result — run concurrently.
+  // Also proves the university/programme are owned by this caller — a
+  // Journey can never point at another user's catalog identity.
   await Promise.all([
-    dto.universityId ? getUniversityOrThrow(dto.universityId) : Promise.resolve(undefined),
-    dto.programmeId ? getProgrammeOrThrow(dto.programmeId) : Promise.resolve(undefined),
+    dto.universityId ? getUniversityOrThrow(dto.universityId, userId) : Promise.resolve(undefined),
+    dto.programmeId ? getProgrammeOrThrow(dto.programmeId, userId) : Promise.resolve(undefined),
   ]);
   return ApplicationJourney.create({ ...dto, userId });
 }
@@ -76,8 +78,8 @@ export async function updateJourney(
 ): Promise<JourneyDocument> {
   const journey = await getJourneyOwnedOrThrow(id, userId);
   await Promise.all([
-    dto.universityId ? getUniversityOrThrow(dto.universityId) : Promise.resolve(undefined),
-    dto.programmeId ? getProgrammeOrThrow(dto.programmeId) : Promise.resolve(undefined),
+    dto.universityId ? getUniversityOrThrow(dto.universityId, userId) : Promise.resolve(undefined),
+    dto.programmeId ? getProgrammeOrThrow(dto.programmeId, userId) : Promise.resolve(undefined),
   ]);
   Object.assign(journey, dto);
   await journey.save();

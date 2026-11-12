@@ -5,6 +5,7 @@ import { Programme } from '../../models/programme.model';
 import { ApplicationJourney } from '../../models/application-journey.model';
 import { JourneyStatus } from '../../lib/enums';
 import { NotFoundError } from '../../lib/http-errors';
+import { normalizeName } from '../../lib/normalize-name';
 import {
   createJourney,
   deleteJourney,
@@ -43,9 +44,18 @@ describe('journeys.service', () => {
       ).rejects.toThrow(NotFoundError);
     });
 
-    it('accepts a real university/programme pair', async () => {
-      const university = await University.create({ name: 'University of Twente' });
-      const programme = await Programme.create({ universityId: university._id, name: 'MSc CS' });
+    it('accepts a real university/programme pair owned by the caller', async () => {
+      const university = await University.create({
+        ownerId: userId,
+        name: 'University of Twente',
+        normalizedName: normalizeName('University of Twente'),
+      });
+      const programme = await Programme.create({
+        ownerId: userId,
+        universityId: university._id,
+        name: 'MSc CS',
+        normalizedName: normalizeName('MSc CS'),
+      });
 
       const journey = await createJourney(userId, {
         title: 'MSc Computer Science',
@@ -54,6 +64,17 @@ describe('journeys.service', () => {
       });
       expect(String(journey.universityId)).toBe(String(university._id));
       expect(String(journey.programmeId)).toBe(String(programme._id));
+    });
+
+    it('rejects a university owned by another user — cannot link to catalog identity you do not own', async () => {
+      const university = await University.create({
+        ownerId: otherUserId,
+        name: 'University of Twente',
+        normalizedName: normalizeName('University of Twente'),
+      });
+      await expect(
+        createJourney(userId, { title: 'MSc Computer Science', universityId: String(university._id) }),
+      ).rejects.toThrow(NotFoundError);
     });
   });
 

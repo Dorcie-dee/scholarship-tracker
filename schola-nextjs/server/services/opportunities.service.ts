@@ -14,18 +14,25 @@ import type {
 import { getProgrammeOrThrow } from './programmes.service';
 import { getUniversityOrThrow } from './universities.service';
 
-/** Ported from the original NestJS backend's `OpportunitiesService`. */
+/**
+ * Personal workspace data — see `docs/decisions.md`, "Catalog data vs. owned
+ * data (superseded)". An Opportunity belongs to whoever imported/created
+ * it; `universityId`/`programmeId`, when set, must point at a University/
+ * Programme the SAME owner already has — an Opportunity can never borrow
+ * another user's catalog identity.
+ */
 
 /**
- * Validates `universityId`/`programmeId` existence (when being set) and the
- * University↔Programme cross-consistency rule: a `programmeId` must belong
- * to the effective `universityId` (new value if being changed, otherwise
- * the document's current value) — an Opportunity must never claim "Programme
- * P at University A" while P actually belongs to University B. `current` is
- * only passed by `updateOpportunity()`, to know the effective
+ * Validates `universityId`/`programmeId` existence+ownership (when being
+ * set) and the University↔Programme cross-consistency rule: a `programmeId`
+ * must belong to the effective `universityId` (new value if being changed,
+ * otherwise the document's current value) — an Opportunity must never claim
+ * "Programme P at University A" while P actually belongs to University B.
+ * `current` is only passed by `updateOpportunity()`, to know the effective
  * university/programme when only one of the two is being changed.
  */
 async function validateRelationships(
+  ownerId: string,
   input: Partial<CreateOpportunityInput>,
   current?: HydratedDocument<OpportunityDoc>,
 ): Promise<void> {
@@ -40,13 +47,13 @@ async function validateRelationships(
     : (current?.programmeId ? String(current.programmeId) : undefined);
 
   const universityCheck = universityIdChanging
-    ? getUniversityOrThrow(input.universityId as string)
+    ? getUniversityOrThrow(input.universityId as string, ownerId)
     : Promise.resolve(undefined);
 
   const needsProgrammeRow =
     programmeIdChanging || (Boolean(effectiveProgrammeId) && Boolean(effectiveUniversityId));
   const programmeCheck = needsProgrammeRow
-    ? getProgrammeOrThrow(effectiveProgrammeId as string)
+    ? getProgrammeOrThrow(effectiveProgrammeId as string, ownerId)
     : Promise.resolve(undefined);
 
   const [, programme] = await Promise.all([universityCheck, programmeCheck]);
@@ -62,19 +69,20 @@ async function validateRelationships(
   }
 }
 
-/** `POST /opportunities` is open to any authenticated user — see `docs/decisions.md`, "RBAC dependency". */
 export async function createOpportunity(
+  ownerId: string,
   input: CreateOpportunityInput,
 ): Promise<HydratedDocument<OpportunityDoc>> {
-  await validateRelationships(input);
-  return Opportunity.create(input);
+  await validateRelationships(ownerId, input);
+  return Opportunity.create({ ...input, ownerId });
 }
 
 /** Keyset-paginated, ordered by `(createdAt, id)` DESC (newest first) — matches the composite index declared on the model. */
 export async function listOpportunities(
+  ownerId: string,
   query: ListOpportunitiesQuery,
 ): Promise<PaginatedResult<HydratedDocument<OpportunityDoc>>> {
-  const filter: FilterQuery<OpportunityDoc> = {};
+  const filter: FilterQuery<OpportunityDoc> = { ownerId };
   if (query.studyLevel) filter.studyLevel = query.studyLevel;
   if (query.country) filter.country = query.country;
   if (query.opportunityType) filter.opportunityType = query.opportunityType;
@@ -84,7 +92,8 @@ export async function listOpportunities(
     // Malformed ids are dropped rather than rejected — a bulk lookup by a
     // caller-supplied id list should return what it can match, the same way
     // any other filter here would just match nothing rather than 400 for an
-    // id that happens not to exist.
+    // id that happens not to exist. Combined with the `ownerId` filter
+    // above, a caller can never use this to probe another user's ids.
     const validIds = query.ids
       .split(',')
       .map((id) => id.trim())
@@ -102,18 +111,20 @@ export async function listOpportunities(
 }
 
 /**
- * Lean existence check — no related rows loaded. Use this whenever the
- * caller only needs to confirm an opportunityId is valid (every FK-
- * validation call site, plus this service's own update/remove). For the
- * actual detail view, use `getOpportunityWithDetailsOrThrow` instead.
+ * Lean existence+ownership check — no related rows loaded. Use this
+ * whenever the caller only needs to confirm an opportunityId is valid and
+ * theirs (every FK-validation call site, plus this service's own
+ * update/remove). For the actual detail view, use
+ * `getOpportunityWithDetailsOrThrow` instead.
  */
 export async function getOpportunityOrThrow(
   id: string,
+  ownerId: string,
 ): Promise<HydratedDocument<OpportunityDoc>> {
   if (!isValidObjectId(id)) {
     throw new NotFoundError('Opportunity not found');
   }
-  const opportunity = await Opportunity.findById(id);
+  const opportunity = await Opportunity.findOne({ _id: id, ownerId });
   if (!opportunity) {
     throw new NotFoundError('Opportunity not found');
   }
@@ -129,8 +140,9 @@ export async function getOpportunityOrThrow(
  */
 export async function getOpportunityWithDetailsOrThrow(
   id: string,
+  ownerId: string,
 ): Promise<Record<string, unknown>> {
-  const opportunity = await getOpportunityOrThrow(id);
+  const opportunity = await getOpportunityOrThrow(id, ownerId);
   const [sources, requirements, deadlines] = await Promise.all([
     OpportunitySource.find({ opportunityId: opportunity._id }).sort({ capturedAt: -1, _id: -1 }),
     Requirement.find({ opportunityId: opportunity._id }),
@@ -146,16 +158,17 @@ export async function getOpportunityWithDetailsOrThrow(
 
 export async function updateOpportunity(
   id: string,
+  ownerId: string,
   input: UpdateOpportunityInput,
 ): Promise<HydratedDocument<OpportunityDoc>> {
-  const opportunity = await getOpportunityOrThrow(id);
-  await validateRelationships(input, opportunity);
+  const opportunity = await getOpportunityOrThrow(id, ownerId);
+  await validateRelationships(ownerId, input, opportunity);
   Object.assign(opportunity, input);
   await opportunity.save();
   return opportunity;
 }
 
-export async function deleteOpportunity(id: string): Promise<void> {
-  await getOpportunityOrThrow(id);
-  await Opportunity.deleteOne({ _id: id });
+export async function deleteOpportunity(id: string, ownerId: string): Promise<void> {
+  await getOpportunityOrThrow(id, ownerId);
+  await Opportunity.deleteOne({ _id: id, ownerId });
 }

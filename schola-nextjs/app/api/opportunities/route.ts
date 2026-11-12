@@ -6,22 +6,19 @@ import { createOpportunity, listOpportunities } from '@/server/services/opportun
 
 export const dynamic = 'force-dynamic';
 
-export const GET = withRoute(async ({ req }) => {
+/**
+ * Opportunities are personal workspace data — see `opportunities.service.ts`'s
+ * doc comment and `docs/decisions.md`, "Catalog data vs. owned data
+ * (superseded)". Every authenticated user manages only their own.
+ */
+export const GET = withRoute(async ({ req, user }) => {
   const query = parseQuery(req.nextUrl.searchParams, listOpportunitiesQuerySchema);
-  const result = await listOpportunities(query);
+  const result = await listOpportunities(user!.sub, query);
   return ok(result);
 });
 
-/**
- * Opportunities are funding finds users are tracking (and optionally a
- * shared catalog). Any authenticated user may create one — recording "I
- * found this scholarship" is the primary product entry, not an admin-only
- * action. This is a deliberate, recent product change — PATCH/DELETE on
- * catalog rows stay ADMIN-only (shared reference curation); see
- * `docs/decisions.md`, "RBAC dependency" / its "Later refinement" note.
- */
-export const POST = withRoute(async ({ req }) => {
+export const POST = withRoute(async ({ req, user }) => {
   const body = await parseBody(req, createOpportunitySchema);
-  const opportunity = await createOpportunity(body);
+  const opportunity = await createOpportunity(user!.sub, body);
   return created(opportunity);
 });

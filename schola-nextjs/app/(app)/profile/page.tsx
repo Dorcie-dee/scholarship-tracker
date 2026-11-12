@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, ApiError, friendlyErrorMessage } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button, buttonVariants, iconButtonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { FieldError, Input, Label, Textarea } from '@/components/ui/form';
 import {
@@ -134,7 +134,7 @@ export default function ProfilePage() {
     return (
       <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
         <Card className="p-6 text-center">
-          <h1 className="font-display text-xl font-semibold text-ink">
+          <h1 className="font-display text-section-heading font-semibold text-ink">
             {is404 ? "We can't find your profile yet" : "We couldn't load your profile"}
           </h1>
           <p className="mt-2 text-sm text-ink-soft">
@@ -162,8 +162,8 @@ export default function ProfilePage() {
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-10">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="font-display text-2xl font-semibold text-ink sm:text-3xl">Profile</h1>
-          <p className="mt-1.5 max-w-xl text-sm text-ink-soft">
+          <h1 className="font-display text-page-title font-semibold text-ink sm:text-page-title-lg">Profile</h1>
+          <p className="mt-1.5 max-w-xl text-supporting text-ink-soft">
             Keep this up to date — it powers your AI requirement suggestions, which check your applications'
             requirements against what's here.
           </p>
@@ -181,7 +181,7 @@ export default function ProfilePage() {
               {user ? initials(user.name, user.email) : '··'}
             </span>
             <div>
-              <h2 className="font-display text-lg font-semibold text-ink">{user?.name || 'Your profile'}</h2>
+              <h2 className="font-display text-card-title font-semibold text-ink">{user?.name || 'Your profile'}</h2>
               <p className="text-sm text-ink-soft">{profile.nationality || 'Nationality not set'}</p>
             </div>
           </div>
@@ -190,7 +190,7 @@ export default function ProfilePage() {
               type="button"
               onClick={() => startEditAbout(profile)}
               aria-label="Edit profile summary"
-              className="flex h-8 w-8 flex-none items-center justify-center rounded-md text-ink-faint hover:bg-line-soft hover:text-ink"
+              className={iconButtonVariants()}
             >
               <PencilIcon size={16} aria-hidden="true" />
             </button>

@@ -2,7 +2,9 @@ import { Schema, model, models, Types } from 'mongoose';
 import { OpportunityType, StudyLevel } from '../lib/enums';
 import { baseSchemaOptions } from '../lib/schema-utils';
 
+/** Personal workspace data — see `university.model.ts`'s doc comment. An opportunity belongs to the user who imported/created it. */
 export interface OpportunityDoc {
+  ownerId: Types.ObjectId;
   title: string;
   provider: string | null;
   opportunityType: OpportunityType;
@@ -24,6 +26,7 @@ export interface OpportunityDoc {
 
 const schema = new Schema<OpportunityDoc>(
   {
+    ownerId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     title: { type: String, required: true },
     provider: { type: String, default: null },
     opportunityType: {
@@ -48,7 +51,7 @@ const schema = new Schema<OpportunityDoc>(
   baseSchemaOptions,
 );
 
-// OpportunitiesService.findAll()'s default keyset pagination sorts on exactly this pair.
-schema.index({ createdAt: 1, _id: 1 });
+// OpportunitiesService.listOpportunities()'s default keyset pagination sorts on exactly this — scoped by owner first.
+schema.index({ ownerId: 1, createdAt: 1, _id: 1 });
 
 export const Opportunity = models.Opportunity || model<OpportunityDoc>('Opportunity', schema);

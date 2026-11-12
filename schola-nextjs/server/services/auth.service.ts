@@ -16,6 +16,8 @@ import {
 import { getConfig } from '../lib/config';
 import { withTransaction } from '../lib/db';
 import { normalizeEmail } from '../lib/normalize-email';
+import { timingSafeEqualStrings } from '../lib/timing-safe';
+import { isDuplicateKeyError } from '../lib/mongo-errors';
 import {
   assertLoginNotLocked,
   recordLoginFailure,
@@ -87,16 +89,6 @@ export function toSafeUser(user: UserHydrated): SafeUser {
     role: user.role,
     createdAt: user.createdAt.toISOString(),
   };
-}
-
-/** MongoDB duplicate-key error (E11000) — the unique-index analogue of Postgres's 23505. */
-function isDuplicateKeyError(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    (err as { code?: unknown }).code === 11000
-  );
 }
 
 /**
@@ -232,6 +224,74 @@ export async function register(
   }
 
   return { user: toSafeUser(user), tokens, pendingOtp };
+}
+
+/**
+ * Creates the platform's first administrator — the only path to an admin
+ * account that exists outside direct database access. Double-gated:
+ * (1) a shared secret (`ADMIN_SETUP_SECRET`, constant-time compared — see
+ * `timingSafeEqualStrings`'s doc comment) that must be configured and
+ * presented, and (2) refuses outright once any admin already exists, so a
+ * leaked or still-configured secret can't mint a second admin later. Skips
+ * the email-verification OTP step `register()` goes through — this is a
+ * trusted, secret-gated bootstrap action, not a public signup.
+ */
+export async function setupAdmin(
+  params: { email: string; password: string; name?: string; setupSecret: string },
+  meta: RequestMeta,
+): Promise<AuthResult> {
+  const configuredSecret = getConfig().adminSetup.secret;
+  if (!configuredSecret) {
+    throw new UnauthorizedError('Admin setup is not enabled on this deployment.');
+  }
+  if (!timingSafeEqualStrings(params.setupSecret, configuredSecret)) {
+    throw new UnauthorizedError('Invalid setup key.');
+  }
+
+  const existingAdmin = await User.findOne({ role: UserRole.ADMIN });
+  if (existingAdmin) {
+    throw new ConflictError('An admin account already exists — this setup page can only be used once.');
+  }
+
+  const normalizedEmail = normalizeEmail(params.email);
+  const existing = await User.findOne({ email: normalizedEmail });
+  if (existing) {
+    throw new ConflictError('An account with this email already exists');
+  }
+
+  const passwordHash = await hashPassword(params.password);
+
+  let user: UserHydrated;
+  try {
+    user = await User.create({
+      email: normalizedEmail,
+      passwordHash,
+      name: params.name ?? null,
+      isVerified: true,
+      role: UserRole.ADMIN,
+    });
+  } catch (err) {
+    if (isDuplicateKeyError(err)) {
+      throw new ConflictError('An account with this email already exists');
+    }
+    throw err;
+  }
+
+  await ApplicantProfile.create({
+    userId: user._id,
+    nationality: null,
+    dateOfBirth: null,
+    summary: null,
+    education: [],
+    experience: [],
+    skills: [],
+    certifications: [],
+    languages: [],
+    metadata: {},
+  });
+
+  const tokens = await issueTokens(user, meta);
+  return { user: toSafeUser(user), tokens };
 }
 
 /**

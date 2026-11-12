@@ -16,7 +16,6 @@ import {
   CheckIcon,
   ClockIcon,
   PlusIcon,
-  SearchIcon,
   SparklesIcon,
 } from '@/components/icons';
 import {
@@ -249,12 +248,12 @@ export default function DashboardPage() {
     <div className="flex flex-col gap-8 p-5 sm:p-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="font-display text-2xl font-semibold text-ink sm:text-3xl">
+          <h1 className="font-display text-page-title font-semibold text-ink sm:text-page-title-lg">
             {greeting()}, {firstName(user?.name ?? null, user?.email ?? '')}.
           </h1>
-          <p className="mt-1.5 text-sm text-ink-soft">{summaryLine}</p>
+          <p className="mt-1.5 text-supporting text-ink-soft">{summaryLine}</p>
         </div>
-        <Link href="/discover" className={buttonVariants({ className: 'flex-none' })}>
+        <Link href="/applications" className={buttonVariants({ className: 'flex-none' })}>
           <PlusIcon size={18} aria-hidden="true" />
           New application
         </Link>
@@ -266,15 +265,15 @@ export default function DashboardPage() {
             <SparklesIcon size={24} aria-hidden="true" />
           </span>
           <div>
-            <p className="font-display text-lg font-semibold text-ink">Welcome to Schola</p>
-            <p className="mx-auto mt-1.5 max-w-sm text-sm text-ink-soft">
-              Once you start tracking a scholarship or programme, your deadlines, tasks and progress will all show up
-              right here.
+            <h2 className="font-display text-section-heading font-semibold text-ink">Welcome to Schola</h2>
+            <p className="mx-auto mt-1.5 max-w-sm text-supporting text-ink-soft">
+              Add the university or scholarship you're applying to and your deadlines, tasks and progress will
+              all show up right here.
             </p>
           </div>
-          <Link href="/discover" className={buttonVariants()}>
-            <SearchIcon size={18} aria-hidden="true" />
-            Discover opportunities
+          <Link href="/applications" className={buttonVariants()}>
+            <PlusIcon size={18} aria-hidden="true" />
+            Get started
           </Link>
         </div>
       ) : (
@@ -295,7 +294,7 @@ export default function DashboardPage() {
           </div>
 
           <section className="flex flex-col gap-3">
-            <h2 className="font-display text-lg font-semibold text-ink">Due soon</h2>
+            <h2 className="font-display text-section-heading font-semibold text-ink">Due soon</h2>
             {dueSoonItems.length === 0 ? (
               <div className="rounded-xl border border-line bg-surface p-6 text-center text-sm text-ink-soft">
                 Nothing due soon — enjoy the breathing room.
@@ -348,7 +347,7 @@ export default function DashboardPage() {
 
           <section className="flex flex-col gap-3">
             <div className="flex items-center justify-between">
-              <h2 className="font-display text-lg font-semibold text-ink">Your applications</h2>
+              <h2 className="font-display text-section-heading font-semibold text-ink">Your applications</h2>
               <Link href="/applications" className="text-sm font-semibold text-primary hover:text-primary-hover">
                 View all
               </Link>
@@ -356,8 +355,8 @@ export default function DashboardPage() {
             {applications.length === 0 ? (
               <div className="rounded-xl border border-line bg-surface p-6 text-center text-sm text-ink-soft">
                 You have a journey started, but no applications in it yet.{' '}
-                <Link href="/discover" className="font-semibold text-primary hover:text-primary-hover">
-                  Find something to apply to
+                <Link href="/applications" className="font-semibold text-primary hover:text-primary-hover">
+                  Add one
                 </Link>
                 .
               </div>

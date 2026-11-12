@@ -1,13 +1,22 @@
 import { describe, expect, it } from 'vitest';
+import { Types } from 'mongoose';
 import { University } from '../../models/university.model';
 import { paginate } from '../pagination';
 import { withTransaction } from '../db';
 import { assertNotRateLimited } from '../rate-limit';
 import { TooManyRequestsError } from '../http-errors';
+import { normalizeName } from '../normalize-name';
+
+const ownerId = new Types.ObjectId();
 
 describe('scaffold smoke test', () => {
   it('creates a document and reads it back with id (not _id)', async () => {
-    const doc = await University.create({ name: 'University of Twente', country: 'Netherlands' });
+    const doc = await University.create({
+      ownerId,
+      name: 'University of Twente',
+      normalizedName: normalizeName('University of Twente'),
+      country: 'Netherlands',
+    });
     const json = doc.toJSON();
     expect(json.id).toBeTypeOf('string');
     expect((json as Record<string, unknown>)._id).toBeUndefined();
@@ -15,7 +24,7 @@ describe('scaffold smoke test', () => {
 
   it('paginates with a keyset cursor across two pages', async () => {
     for (let i = 0; i < 5; i++) {
-      await University.create({ name: `Uni ${i}` });
+      await University.create({ ownerId, name: `Uni ${i}`, normalizedName: normalizeName(`Uni ${i}`) });
     }
     const page1 = await paginate(University, { sortField: 'name', sortOrder: 'asc', limit: 2 });
     expect(page1.items).toHaveLength(2);
@@ -36,8 +45,8 @@ describe('scaffold smoke test', () => {
 
   it('commits a multi-document transaction atomically', async () => {
     await withTransaction(async (session) => {
-      await University.create([{ name: 'Txn University A' }], { session });
-      await University.create([{ name: 'Txn University B' }], { session });
+      await University.create([{ ownerId, name: 'Txn University A', normalizedName: normalizeName('Txn University A') }], { session });
+      await University.create([{ ownerId, name: 'Txn University B', normalizedName: normalizeName('Txn University B') }], { session });
     });
     const count = await University.countDocuments({ name: /^Txn University/ });
     expect(count).toBe(2);

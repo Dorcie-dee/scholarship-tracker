@@ -10,19 +10,18 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-/** Not ADMIN-gated — see /opportunity-sources/route.ts's doc comment. */
-export const GET = withRoute<{ id: string }>(async ({ params }) => {
-  const source = await getOpportunitySourceOrThrow(params.id);
+export const GET = withRoute<{ id: string }>(async ({ params, user }) => {
+  const source = await getOpportunitySourceOrThrow(params.id, user!.sub);
   return ok(source);
 });
 
-export const PATCH = withRoute<{ id: string }>(async ({ req, params }) => {
+export const PATCH = withRoute<{ id: string }>(async ({ req, params, user }) => {
   const body = await parseBody(req, updateOpportunitySourceSchema);
-  const source = await updateOpportunitySource(params.id, body);
+  const source = await updateOpportunitySource(params.id, user!.sub, body);
   return ok(source);
 });
 
-export const DELETE = withRoute<{ id: string }>(async ({ params }) => {
-  await deleteOpportunitySource(params.id);
+export const DELETE = withRoute<{ id: string }>(async ({ params, user }) => {
+  await deleteOpportunitySource(params.id, user!.sub);
   return noContent();
 });

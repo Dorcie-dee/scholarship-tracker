@@ -9,15 +9,15 @@ import { createOpportunitySource, listOpportunitySources } from '@/server/servic
 
 export const dynamic = 'force-dynamic';
 
-/** Not ADMIN-gated — full CRUD is open to any authenticated user; sources hang off an opportunity they track. */
-export const GET = withRoute(async ({ req }) => {
+/** Owner-scoped — sources hang off an opportunity the caller owns. See `opportunity-sources.service.ts`'s doc comment. */
+export const GET = withRoute(async ({ req, user }) => {
   const query = parseQuery(req.nextUrl.searchParams, listOpportunitySourcesQuerySchema);
-  const result = await listOpportunitySources(query);
+  const result = await listOpportunitySources(user!.sub, query);
   return ok(result);
 });
 
-export const POST = withRoute(async ({ req }) => {
+export const POST = withRoute(async ({ req, user }) => {
   const body = await parseBody(req, createOpportunitySourceSchema);
-  const source = await createOpportunitySource(body);
+  const source = await createOpportunitySource(user!.sub, body);
   return created(source);
 });

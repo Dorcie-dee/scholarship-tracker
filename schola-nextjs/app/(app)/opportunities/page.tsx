@@ -7,10 +7,12 @@ import { apiFetch, friendlyErrorMessage } from '@/lib/api-client';
 import { opportunityTypeLabel, studyLevelLabel } from '@/lib/status';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Drawer } from '@/components/ui/drawer';
 import { Input, Label } from '@/components/ui/form';
-import { GlobeIcon, SearchIcon } from '@/components/icons';
+import { PlusIcon, SearchIcon, SparklesIcon } from '@/components/icons';
 import { useDebouncedValue } from '@/components/discover/use-debounced-value';
 import { OpportunityCard } from '@/components/discover/opportunity-card';
+import { AddOpportunityPanel } from '@/components/discover/add-opportunity-panel';
 import { Toast, type ToastState } from '@/components/discover/toast';
 import {
   OPPORTUNITY_TYPE_VALUES,
@@ -22,7 +24,7 @@ import {
   type University,
 } from '@/components/discover/types';
 
-/** A page worth of catalog rows per request — large enough that most searches/filters resolve without a "Load more" click. */
+/** A page worth of rows per request — large enough that most searches/filters resolve without a "Load more" click. */
 const PAGE_SIZE = 48;
 
 const SELECT_CLASSES =
@@ -55,7 +57,17 @@ function CardSkeleton() {
   );
 }
 
-export default function DiscoverPage() {
+/**
+ * My Opportunities — every scholarship/grant/fellowship/programme the
+ * caller has personally added or imported. This used to be a shared,
+ * admin-seeded catalog every user browsed (`/discover`); opportunities are
+ * now personal workspace data (see `docs/decisions.md`, "Catalog data vs.
+ * owned data (superseded)"), so `GET /opportunities` already returns only
+ * the caller's own rows — this page needs no client-side ownership
+ * filtering, just the "add your own" entry point a shared catalog never
+ * needed.
+ */
+export default function OpportunitiesPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
 
@@ -65,12 +77,13 @@ export default function DiscoverPage() {
   const [opportunityType, setOpportunityType] = useState('');
   const [country, setCountry] = useState('');
 
+  const [isAdding, setIsAdding] = useState(false);
   const [activePanelId, setActivePanelId] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
 
   const opportunitiesQuery = useInfiniteQuery({
-    queryKey: ['opportunities', 'catalog'],
+    queryKey: ['opportunities', 'mine'],
     queryFn: ({ pageParam }) =>
       apiFetch<PaginatedResult<Opportunity>>(
         `/opportunities?limit=${PAGE_SIZE}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`,
@@ -130,6 +143,7 @@ export default function DiscoverPage() {
   }, [opportunities, studyLevel, opportunityType, country, search, universityNameById]);
 
   const hasActiveFilters = Boolean(searchInput || studyLevel || opportunityType || country);
+  const isEmptyWorkspace = !opportunitiesQuery.isLoading && !opportunitiesQuery.isError && opportunities.length === 0;
 
   function clearFilters() {
     setSearchInput('');
@@ -183,72 +197,101 @@ export default function DiscoverPage() {
     }
   }
 
+  function handleOpportunityCreated(opportunity: Opportunity) {
+    setIsAdding(false);
+    queryClient.setQueryData<{ pages: PaginatedResult<Opportunity>[]; pageParams: unknown[] }>(
+      ['opportunities', 'mine'],
+      (prev) =>
+        prev
+          ? { ...prev, pages: [{ ...prev.pages[0], items: [opportunity, ...prev.pages[0].items] }, ...prev.pages.slice(1)] }
+          : prev,
+    );
+    setToast({ message: `Added "${opportunity.title}" to your opportunities.`, tone: 'success' });
+  }
+
   const submitting = createJourneyMutation.isPending || createApplicationMutation.isPending;
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
-      <div>
-        <h1 className="font-display text-2xl font-semibold text-ink sm:text-3xl">Discover</h1>
-        <p className="mt-1.5 max-w-xl text-sm text-ink-soft">
-          Browse scholarships, grants, and fellowships, and start tracking the ones worth applying to.
-        </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="font-display text-page-title font-semibold text-ink sm:text-page-title-lg">My opportunities</h1>
+          <p className="mt-1.5 max-w-xl text-supporting text-ink-soft">
+            Every scholarship, grant, and fellowship you've brought into Schola — paste a link or add one by hand.
+          </p>
+        </div>
+        <Button type="button" onClick={() => setIsAdding(true)} className="flex-none">
+          <PlusIcon size={18} aria-hidden="true" />
+          Add opportunity
+        </Button>
       </div>
 
-      <div className="mt-6 flex flex-col gap-3">
-        <div className="relative">
-          <SearchIcon
-            size={18}
-            className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-faint"
-            aria-hidden="true"
-          />
-          <Label htmlFor="discover-search" className="sr-only">
-            Search opportunities
-          </Label>
-          <Input
-            id="discover-search"
-            type="search"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search by title, field, university, or provider"
-            className="pl-10"
-          />
+      <Drawer
+        open={isAdding}
+        onClose={() => setIsAdding(false)}
+        title="Add an opportunity"
+        description="Bring in a scholarship, grant, or programme you found — paste its link or enter it yourself."
+      >
+        <AddOpportunityPanel onCreated={handleOpportunityCreated} onCancel={() => setIsAdding(false)} />
+      </Drawer>
+
+      {!isEmptyWorkspace && (
+        <div className="mt-6 flex flex-col gap-3">
+          <div className="relative">
+            <SearchIcon
+              size={18}
+              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-faint"
+              aria-hidden="true"
+            />
+            <Label htmlFor="opportunities-search" className="sr-only">
+              Search your opportunities
+            </Label>
+            <Input
+              id="opportunities-search"
+              type="search"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by title, field, university, or provider"
+              className="pl-10"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3">
+            <FilterSelect label="Study level" value={studyLevel} onChange={(e) => setStudyLevel(e.target.value)}>
+              <option value="">All study levels</option>
+              {STUDY_LEVEL_VALUES.map((value) => (
+                <option key={value} value={value}>
+                  {studyLevelLabel(value)}
+                </option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect label="Type" value={opportunityType} onChange={(e) => setOpportunityType(e.target.value)}>
+              <option value="">All types</option>
+              {OPPORTUNITY_TYPE_VALUES.map((value) => (
+                <option key={value} value={value}>
+                  {opportunityTypeLabel(value)}
+                </option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect label="Country" value={country} onChange={(e) => setCountry(e.target.value)}>
+              <option value="">All countries</option>
+              {countryOptions.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </FilterSelect>
+
+            {hasActiveFilters && (
+              <Button type="button" variant="ghost" size="sm" onClick={clearFilters} className="mb-0.5">
+                Clear filters
+              </Button>
+            )}
+          </div>
         </div>
-
-        <div className="flex flex-wrap items-end gap-3">
-          <FilterSelect label="Study level" value={studyLevel} onChange={(e) => setStudyLevel(e.target.value)}>
-            <option value="">All study levels</option>
-            {STUDY_LEVEL_VALUES.map((value) => (
-              <option key={value} value={value}>
-                {studyLevelLabel(value)}
-              </option>
-            ))}
-          </FilterSelect>
-
-          <FilterSelect label="Type" value={opportunityType} onChange={(e) => setOpportunityType(e.target.value)}>
-            <option value="">All types</option>
-            {OPPORTUNITY_TYPE_VALUES.map((value) => (
-              <option key={value} value={value}>
-                {opportunityTypeLabel(value)}
-              </option>
-            ))}
-          </FilterSelect>
-
-          <FilterSelect label="Country" value={country} onChange={(e) => setCountry(e.target.value)}>
-            <option value="">All countries</option>
-            {countryOptions.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </FilterSelect>
-
-          {hasActiveFilters && (
-            <Button type="button" variant="ghost" size="sm" onClick={clearFilters} className="mb-0.5">
-              Clear filters
-            </Button>
-          )}
-        </div>
-      </div>
+      )}
 
       <div className="mt-6">
         {opportunitiesQuery.isLoading ? (
@@ -259,17 +302,32 @@ export default function DiscoverPage() {
           </div>
         ) : opportunitiesQuery.isError ? (
           <Card className="p-6 text-center">
-            <h2 className="font-display text-lg font-semibold text-ink">We couldn't load opportunities</h2>
+            <h2 className="font-display text-section-heading font-semibold text-ink">We couldn't load your opportunities</h2>
             <p className="mt-2 text-sm text-ink-soft">{friendlyErrorMessage(opportunitiesQuery.error)}</p>
             <Button className="mt-4" onClick={() => opportunitiesQuery.refetch()}>
               Try again
             </Button>
           </Card>
+        ) : isEmptyWorkspace ? (
+          <Card className="flex flex-col items-center gap-2 p-10 text-center">
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary-soft text-primary">
+              <SparklesIcon size={24} aria-hidden="true" />
+            </span>
+            <h2 className="font-display text-section-heading font-semibold text-ink">Nothing here yet</h2>
+            <p className="max-w-sm text-sm text-ink-soft">
+              Found a scholarship, grant, or programme somewhere else? Paste its link or add it by hand — Schola
+              will help you track it from there.
+            </p>
+            <Button type="button" className="mt-2" onClick={() => setIsAdding(true)}>
+              <PlusIcon size={16} aria-hidden="true" />
+              Add your first opportunity
+            </Button>
+          </Card>
         ) : filteredOpportunities.length === 0 ? (
           <Card className="flex flex-col items-center gap-2 p-10 text-center">
-            <GlobeIcon size={28} className="text-ink-faint" aria-hidden="true" />
-            <h2 className="font-display text-lg font-semibold text-ink">No opportunities match yet</h2>
-            <p className="max-w-sm text-sm text-ink-soft">Try a different search or check back soon.</p>
+            <SearchIcon size={28} className="text-ink-faint" aria-hidden="true" />
+            <h2 className="font-display text-section-heading font-semibold text-ink">No opportunities match yet</h2>
+            <p className="max-w-sm text-sm text-ink-soft">Try a different search or filter.</p>
             {hasActiveFilters && (
               <Button type="button" variant="secondary" size="sm" className="mt-2" onClick={clearFilters}>
                 Clear filters
@@ -308,7 +366,7 @@ export default function DiscoverPage() {
                   onClick={() => opportunitiesQuery.fetchNextPage()}
                   disabled={opportunitiesQuery.isFetchingNextPage}
                 >
-                  {opportunitiesQuery.isFetchingNextPage ? 'Loading more…' : 'Load more opportunities'}
+                  {opportunitiesQuery.isFetchingNextPage ? 'Loading more…' : 'Load more'}
                 </Button>
               </div>
             )}

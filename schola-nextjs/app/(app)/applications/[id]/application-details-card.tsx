@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, friendlyErrorMessage } from '@/lib/api-client';
 import { formatDate } from '@/lib/status';
-import { Button } from '@/components/ui/button';
+import { Button, iconButtonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { FieldError, Input, Label, Textarea } from '@/components/ui/form';
 import { GlobeIcon, PencilIcon } from '@/components/icons';
@@ -203,7 +203,7 @@ export function ApplicationDetailsCard({ application }: { application: Applicati
             setEditing(true);
           }}
           aria-label="Edit application details"
-          className="flex h-8 w-8 flex-none items-center justify-center rounded-lg text-ink-faint transition-colors hover:bg-line-soft hover:text-ink"
+          className={iconButtonVariants()}
         >
           <PencilIcon size={16} aria-hidden="true" />
         </button>

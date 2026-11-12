@@ -2,6 +2,8 @@ import { Types } from 'mongoose';
 import { Application, type ApplicationDoc } from '../models/application.model';
 import { ApplicationJourney, type ApplicationJourneyDoc } from '../models/application-journey.model';
 import { Opportunity, type OpportunityDoc } from '../models/opportunity.model';
+import { University, type UniversityDoc } from '../models/university.model';
+import { Programme, type ProgrammeDoc } from '../models/programme.model';
 import { NotFoundError } from '../lib/http-errors';
 
 /**
@@ -93,16 +95,48 @@ export async function isApplicationLiveAndOwned(
   }
 }
 
-/** Opportunities are shared catalog data — existence-only check, no ownership dimension. */
-export async function findOpportunityOrThrow(
+/**
+ * Opportunities are personal workspace data (see `opportunity.model.ts`'s
+ * doc comment) — owned by whoever imported/created them. Same 404-not-403
+ * shape as every other ownership check here: a real opportunity owned by
+ * someone else looks identical to one that doesn't exist.
+ */
+export async function findOwnedOpportunityOrThrow(
   opportunityId: string,
+  userId: string,
 ): Promise<HydratedDoc<OpportunityDoc>> {
   assertValidObjectId(opportunityId, 'Opportunity');
-  const opportunity = await Opportunity.findById(opportunityId);
+  const opportunity = await Opportunity.findOne({ _id: opportunityId, ownerId: userId });
   if (!opportunity) {
     throw new NotFoundError('Opportunity not found');
   }
   return opportunity as HydratedDoc<OpportunityDoc>;
+}
+
+/** Universities are personal workspace data — see `university.model.ts`'s doc comment. */
+export async function findOwnedUniversityOrThrow(
+  universityId: string,
+  userId: string,
+): Promise<HydratedDoc<UniversityDoc>> {
+  assertValidObjectId(universityId, 'University');
+  const university = await University.findOne({ _id: universityId, ownerId: userId });
+  if (!university) {
+    throw new NotFoundError('University not found');
+  }
+  return university as HydratedDoc<UniversityDoc>;
+}
+
+/** Programmes are personal workspace data — see `university.model.ts`'s doc comment. */
+export async function findOwnedProgrammeOrThrow(
+  programmeId: string,
+  userId: string,
+): Promise<HydratedDoc<ProgrammeDoc>> {
+  assertValidObjectId(programmeId, 'Programme');
+  const programme = await Programme.findOne({ _id: programmeId, ownerId: userId });
+  if (!programme) {
+    throw new NotFoundError('Programme not found');
+  }
+  return programme as HydratedDoc<ProgrammeDoc>;
 }
 
 /**

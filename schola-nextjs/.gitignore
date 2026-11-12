@@ -25,6 +25,7 @@ yarn-error.log*
 # committed) and .env.example (committed template)
 .env*
 !.env.example
+.env
 
 # vercel
 .vercel
@@ -32,3 +33,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+.seed.ts

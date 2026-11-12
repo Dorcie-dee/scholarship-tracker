@@ -7,9 +7,12 @@ import { apiFetch, friendlyErrorMessage } from '@/lib/api-client';
 import { applicationStatusMeta } from '@/lib/status';
 import { cn } from '@/lib/cn';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Drawer } from '@/components/ui/drawer';
 import { Pill } from '@/components/ui/pill';
 import { FieldError, Input, Label } from '@/components/ui/form';
 import { ApplicationCard } from '@/components/applications/application-card';
+import { NewJourneyPanel } from '@/components/applications/new-journey-panel';
+import { Toast, type ToastState } from '@/components/discover/toast';
 import { PlusIcon, SearchIcon, XIcon } from '@/components/icons';
 import {
   groupBy,
@@ -40,6 +43,27 @@ const APPLICATION_STATUS_VALUES = [
   'rejected',
   'withdrawn',
 ] as const;
+
+/** Mirrors `ApplicationType` in `server/lib/enums.ts` — keep both in sync (same convention as `APPLICATION_STATUS_VALUES` above). */
+const APPLICATION_TYPE_VALUES = [
+  'admission',
+  'university_scholarship',
+  'external_scholarship',
+  'other_funding',
+  'other',
+] as const;
+
+const APPLICATION_TYPE_LABELS: Record<string, string> = {
+  admission: 'University admission',
+  university_scholarship: 'University scholarship',
+  external_scholarship: 'External scholarship',
+  other_funding: 'Other funding',
+  other: 'Other',
+};
+
+function applicationTypeLabel(type: string): string {
+  return APPLICATION_TYPE_LABELS[type] ?? type;
+}
 
 const SELECT_FIELD_CLASSES =
   'h-11 w-full rounded-lg border border-line bg-surface px-3.5 text-sm text-ink focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20';
@@ -72,10 +96,15 @@ function NewApplicationForm({
   const queryClient = useQueryClient();
   const [journeyId, setJourneyId] = useState(journeys[0]?.id ?? '');
   const [title, setTitle] = useState('');
+  // Defaults to the same `other` the backend itself defaults to when the
+  // field is omitted (`ApplicationType.OTHER`, `application.model.ts`) —
+  // this just lets the user override that default up front instead of only
+  // being able to fix it afterward on the application's detail page.
+  const [applicationType, setApplicationType] = useState<string>('other');
   const [error, setError] = useState<string | null>(null);
 
   const createApplication = useMutation({
-    mutationFn: (vars: { journeyId: string; title: string }) =>
+    mutationFn: (vars: { journeyId: string; title: string; applicationType: string }) =>
       apiFetch<Application>('/applications', { method: 'POST', body: vars }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['applications'] });
@@ -95,7 +124,7 @@ function NewApplicationForm({
       setError('Give this application a title.');
       return;
     }
-    createApplication.mutate({ journeyId, title: title.trim() });
+    createApplication.mutate({ journeyId, title: title.trim(), applicationType });
   }
 
   return (
@@ -127,6 +156,21 @@ function NewApplicationForm({
           placeholder="e.g. Chevening Scholarship"
         />
       </div>
+      <div className="flex-1">
+        <Label htmlFor="new-app-type">Type</Label>
+        <select
+          id="new-app-type"
+          className={SELECT_FIELD_CLASSES}
+          value={applicationType}
+          onChange={(e) => setApplicationType(e.target.value)}
+        >
+          {APPLICATION_TYPE_VALUES.map((value) => (
+            <option key={value} value={value}>
+              {applicationTypeLabel(value)}
+            </option>
+          ))}
+        </select>
+      </div>
       <div className="flex gap-2 sm:flex-none">
         <Button type="submit" disabled={createApplication.isPending} className="flex-1 sm:flex-none">
           {createApplication.isPending ? 'Adding…' : 'Add application'}
@@ -149,6 +193,14 @@ export default function ApplicationsPage() {
   const applicationsQuery = useApplications();
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [isStartingJourney, setIsStartingJourney] = useState(false);
+  const [toast, setToast] = useState<ToastState | null>(null);
+
+  function handleJourneyCreated(reuseNotice?: string) {
+    setIsStartingJourney(false);
+    void journeysQuery.refetch();
+    if (reuseNotice) setToast({ message: reuseNotice, tone: 'info' });
+  }
 
   const journeys = journeysQuery.data?.items ?? [];
   const applications = applicationsQuery.data?.items ?? [];
@@ -197,23 +249,43 @@ export default function ApplicationsPage() {
   if (journeys.length === 0) {
     return (
       <div className="flex flex-col gap-8 p-5 sm:p-8">
-        <h1 className="font-display text-2xl font-semibold text-ink sm:text-3xl">My applications</h1>
+        <h1 className="font-display text-page-title font-semibold text-ink sm:text-page-title-lg">My applications</h1>
         <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-line bg-surface px-6 py-14 text-center">
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary-soft text-primary">
             <SearchIcon size={24} aria-hidden="true" />
           </span>
           <div>
-            <p className="font-display text-lg font-semibold text-ink">No applications yet</p>
-            <p className="mx-auto mt-1.5 max-w-sm text-sm text-ink-soft">
-              Start by finding a scholarship, grant or programme worth applying to — we'll help you track
-              everything from there.
+            <p className="font-display text-card-title font-semibold text-ink">No applications yet</p>
+            <p className="mx-auto mt-1.5 max-w-sm text-supporting text-ink-soft">
+              Start with the university or programme you're applying to, or bring in a scholarship you've
+              found — either way works.
             </p>
           </div>
-          <Link href="/discover" className={buttonVariants()}>
-            <SearchIcon size={18} aria-hidden="true" />
-            Discover opportunities
-          </Link>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button type="button" onClick={() => setIsStartingJourney(true)}>
+              <PlusIcon size={18} aria-hidden="true" />
+              Start with a university
+            </Button>
+            <Link href="/opportunities" className={buttonVariants({ variant: 'secondary' })}>
+              <SearchIcon size={18} aria-hidden="true" />
+              Start with an opportunity
+            </Link>
+          </div>
         </div>
+
+        <Drawer
+          open={isStartingJourney}
+          onClose={() => setIsStartingJourney(false)}
+          title="Start a new journey"
+          description="Add the university and programme you're applying to — no need for a scholarship first."
+        >
+          <NewJourneyPanel
+            onCreated={(_journey, reuseNotice) => handleJourneyCreated(reuseNotice)}
+            onCancel={() => setIsStartingJourney(false)}
+          />
+        </Drawer>
+
+        <Toast toast={toast} onDismiss={() => setToast(null)} />
       </div>
     );
   }
@@ -232,20 +304,36 @@ export default function ApplicationsPage() {
     <div className="flex flex-col gap-8 p-5 sm:p-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="font-display text-2xl font-semibold text-ink sm:text-3xl">My applications</h1>
-          <p className="mt-1.5 text-sm text-ink-soft">Every application you're tracking, grouped by journey.</p>
+          <h1 className="font-display text-page-title font-semibold text-ink sm:text-page-title-lg">My applications</h1>
+          <p className="mt-1.5 text-supporting text-ink-soft">Every application you're tracking, grouped by journey.</p>
         </div>
-        <div className="flex flex-none gap-2">
+        <div className="flex flex-none flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => setIsStartingJourney((v) => !v)}>
+            <PlusIcon size={18} aria-hidden="true" />
+            New journey
+          </Button>
           <Button variant="secondary" onClick={() => setIsCreating((v) => !v)}>
             <PlusIcon size={18} aria-hidden="true" />
             Add directly
           </Button>
-          <Link href="/discover" className={buttonVariants()}>
+          <Link href="/opportunities" className={buttonVariants()}>
             <SearchIcon size={18} aria-hidden="true" />
-            New application
+            From an opportunity
           </Link>
         </div>
       </div>
+
+      <Drawer
+        open={isStartingJourney}
+        onClose={() => setIsStartingJourney(false)}
+        title="Start a new journey"
+        description="Add the university and programme you're applying to — no need for a scholarship first."
+      >
+        <NewJourneyPanel
+          onCreated={(_journey, reuseNotice) => handleJourneyCreated(reuseNotice)}
+          onCancel={() => setIsStartingJourney(false)}
+        />
+      </Drawer>
 
       {isCreating && <NewApplicationForm journeys={journeys} onClose={() => setIsCreating(false)} />}
 
@@ -290,7 +378,7 @@ export default function ApplicationsPage() {
         <div className="flex flex-col gap-8">
           {groups.map(({ journey, apps, totalCount }) => (
             <section key={journey.id} className="flex flex-col gap-3">
-              <h2 className="flex items-baseline gap-2 font-display text-lg font-semibold text-ink">
+              <h2 className="flex items-baseline gap-2 font-display text-section-heading font-semibold text-ink">
                 {journey.title}
                 <span className="font-sans text-sm font-normal text-ink-faint">
                   {totalCount} application{totalCount === 1 ? '' : 's'}
@@ -318,6 +406,8 @@ export default function ApplicationsPage() {
           ))}
         </div>
       )}
+
+      <Toast toast={toast} onDismiss={() => setToast(null)} />
     </div>
   );
 }

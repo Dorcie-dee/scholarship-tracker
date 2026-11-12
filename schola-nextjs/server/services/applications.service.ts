@@ -133,7 +133,7 @@ export async function createApplication(
   // Independent checks — neither depends on the other's result — run concurrently.
   const [journey, opportunity] = await Promise.all([
     getJourneyOwnedOrThrow(dto.journeyId, userId),
-    dto.opportunityId ? getOpportunityOrThrow(dto.opportunityId) : Promise.resolve(null),
+    dto.opportunityId ? getOpportunityOrThrow(dto.opportunityId, userId) : Promise.resolve(null),
   ]);
 
   const opportunityRequirements = opportunity
@@ -212,7 +212,7 @@ export async function updateApplication(
   }
 
   if (dto.opportunityId) {
-    await getOpportunityOrThrow(dto.opportunityId);
+    await getOpportunityOrThrow(dto.opportunityId, userId);
   }
 
   const { journeyId: _ignoredJourneyId, ...rest } = dto;

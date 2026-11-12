@@ -18,6 +18,9 @@ import {
 } from '../../lib/enums';
 import { BadRequestError, ConflictError, NotFoundError } from '../../lib/http-errors';
 import { createJourney } from '../journeys.service';
+import { createRequirement } from '../requirements.service';
+import { createTask } from '../tasks.service';
+import { createDeadline } from '../deadlines.service';
 import {
   attachDocument,
   createApplication,
@@ -82,7 +85,7 @@ describe('applications.service', () => {
   describe('createApplication — Opportunity → Application requirement copy', () => {
     it('copies every Requirement from the Opportunity into new, application-scoped rows with provenance, atomically', async () => {
       const journey = await makeJourney();
-      const opportunity = await Opportunity.create({ title: 'Fulbright Scholarship' });
+      const opportunity = await Opportunity.create({ ownerId: userId, title: 'Fulbright Scholarship' });
       const req1 = await Requirement.create({
         opportunityId: opportunity._id,
         requirementType: RequirementType.GPA,
@@ -123,7 +126,7 @@ describe('applications.service', () => {
 
     it('creates no copies, but still creates the Application, when the Opportunity has zero requirements', async () => {
       const journey = await makeJourney();
-      const opportunity = await Opportunity.create({ title: 'Empty Opportunity' });
+      const opportunity = await Opportunity.create({ ownerId: userId, title: 'Empty Opportunity' });
 
       const application = await createApplication(userId, {
         journeyId: String(journey._id),
@@ -138,7 +141,7 @@ describe('applications.service', () => {
 
     it('is never re-triggered by a later PATCH that sets/changes opportunityId', async () => {
       const journey = await makeJourney();
-      const opportunity = await Opportunity.create({ title: 'Fulbright Scholarship' });
+      const opportunity = await Opportunity.create({ ownerId: userId, title: 'Fulbright Scholarship' });
       await Requirement.create({
         opportunityId: opportunity._id,
         requirementType: RequirementType.GPA,
@@ -413,6 +416,171 @@ describe('applications.service', () => {
       await expect(getSnapshot(userId, String(applicationB._id), String(snapshotA._id))).rejects.toThrow(
         NotFoundError,
       );
+    });
+  });
+
+  /**
+   * Scenario C/D from the product-direction correction: one journey must be
+   * able to hold an admission Application alongside several independent
+   * funding/scholarship Applications, each referencing a different
+   * Opportunity — never forced into a single merged record — and every
+   * child row (Requirement/Task/Deadline/Document/Snapshot) must stay
+   * correctly scoped to whichever Application it actually belongs to.
+   */
+  describe('one journey, one admission application, multiple funding applications', () => {
+    it('supports an admission application and several scholarship applications, each against a different Opportunity, under one journey', async () => {
+      const journey = await makeJourney();
+      const scholarshipA = await Opportunity.create({ ownerId: userId, title: 'External Scholarship A' });
+      const scholarshipB = await Opportunity.create({ ownerId: userId, title: 'University Scholarship B' });
+
+      const admission = await createApplication(userId, {
+        journeyId: String(journey._id),
+        title: 'University Admission',
+        applicationType: ApplicationType.ADMISSION,
+      });
+      const fundingA = await createApplication(userId, {
+        journeyId: String(journey._id),
+        title: 'Apply for Scholarship A',
+        applicationType: ApplicationType.EXTERNAL_SCHOLARSHIP,
+        opportunityId: String(scholarshipA._id),
+      });
+      const fundingB = await createApplication(userId, {
+        journeyId: String(journey._id),
+        title: 'Apply for Scholarship B',
+        applicationType: ApplicationType.UNIVERSITY_SCHOLARSHIP,
+        opportunityId: String(scholarshipB._id),
+      });
+
+      expect(admission.opportunityId).toBeNull();
+      expect(String(fundingA.opportunityId)).toBe(String(scholarshipA._id));
+      expect(String(fundingB.opportunityId)).toBe(String(scholarshipB._id));
+
+      const page = await listApplicationsForUser(userId, String(journey._id), {});
+      const ids = page.items.map((a) => String(a._id)).sort();
+      expect(ids).toEqual([String(admission._id), String(fundingA._id), String(fundingB._id)].sort());
+      expect(page.items.find((a) => String(a._id) === String(admission._id))?.applicationType).toBe(
+        ApplicationType.ADMISSION,
+      );
+      expect(page.items.find((a) => String(a._id) === String(fundingA._id))?.applicationType).toBe(
+        ApplicationType.EXTERNAL_SCHOLARSHIP,
+      );
+    });
+
+    it('each application is independently editable — updating one never touches the others', async () => {
+      const journey = await makeJourney();
+      const admission = await createApplication(userId, { journeyId: String(journey._id), title: 'Admission' });
+      const funding = await createApplication(userId, { journeyId: String(journey._id), title: 'Funding' });
+
+      await updateApplication(String(funding._id), userId, { status: ApplicationStatus.SUBMITTED });
+
+      const reloadedAdmission = await getApplicationOwnedOrThrow(String(admission._id), userId);
+      const reloadedFunding = await getApplicationOwnedOrThrow(String(funding._id), userId);
+      expect(reloadedAdmission.status).toBe(ApplicationStatus.NOT_STARTED);
+      expect(reloadedFunding.status).toBe(ApplicationStatus.SUBMITTED);
+    });
+
+    it('Requirements, Tasks, Deadlines, Documents, and Snapshots stay scoped to the correct sibling application', async () => {
+      await makeProfile();
+      const journey = await makeJourney();
+      const applicationA = await createApplication(userId, { journeyId: String(journey._id), title: 'Admission' });
+      const applicationB = await createApplication(userId, { journeyId: String(journey._id), title: 'Funding' });
+
+      const requirementA = await createRequirement(userId, {
+        requirementType: RequirementType.GPA,
+        description: 'A-only requirement',
+        applicationId: String(applicationA._id),
+      });
+      const requirementB = await createRequirement(userId, {
+        requirementType: RequirementType.LANGUAGE,
+        description: 'B-only requirement',
+        applicationId: String(applicationB._id),
+      });
+
+      const taskA = await createTask(userId, {
+        journeyId: String(journey._id),
+        applicationId: String(applicationA._id),
+        title: 'A-only task',
+      });
+      const taskB = await createTask(userId, {
+        journeyId: String(journey._id),
+        applicationId: String(applicationB._id),
+        title: 'B-only task',
+      });
+
+      const deadlineA = await createDeadline(userId, {
+        label: 'A-only deadline',
+        date: new Date().toISOString(),
+        applicationId: String(applicationA._id),
+      });
+      const deadlineB = await createDeadline(userId, {
+        label: 'B-only deadline',
+        date: new Date().toISOString(),
+        applicationId: String(applicationB._id),
+      });
+
+      const documentA = await DocumentModel.create({
+        ownerId: userId,
+        title: 'A-only doc',
+        documentType: DocumentType.CV,
+        cloudinaryPublicId: 'pub-a',
+        cloudinaryUrl: 'https://example.com/a.pdf',
+      });
+      await attachDocument(userId, String(applicationA._id), { documentId: String(documentA._id) });
+      const documentB = await DocumentModel.create({
+        ownerId: userId,
+        title: 'B-only doc',
+        documentType: DocumentType.CV,
+        cloudinaryPublicId: 'pub-b',
+        cloudinaryUrl: 'https://example.com/b.pdf',
+      });
+      await attachDocument(userId, String(applicationB._id), { documentId: String(documentB._id) });
+
+      const snapshotA = await createSnapshot(userId, String(applicationA._id), { label: 'A snapshot' });
+      const snapshotB = await createSnapshot(userId, String(applicationB._id), { label: 'B snapshot' });
+
+      // Every child row resolves back to the application it was created
+      // against, never its sibling under the same journey.
+      expect(String(requirementA.applicationId)).toBe(String(applicationA._id));
+      expect(String(requirementB.applicationId)).toBe(String(applicationB._id));
+      expect(String(taskA.applicationId)).toBe(String(applicationA._id));
+      expect(String(taskB.applicationId)).toBe(String(applicationB._id));
+      expect(String(deadlineA.applicationId)).toBe(String(applicationA._id));
+      expect(String(deadlineB.applicationId)).toBe(String(applicationB._id));
+
+      const docsOnA = await listApplicationDocuments(userId, String(applicationA._id));
+      const docsOnB = await listApplicationDocuments(userId, String(applicationB._id));
+      expect(docsOnA.map((d) => String(d.documentId))).toEqual([String(documentA._id)]);
+      expect(docsOnB.map((d) => String(d.documentId))).toEqual([String(documentB._id)]);
+
+      const snapshotsOnA = await listSnapshots(userId, String(applicationA._id));
+      const snapshotsOnB = await listSnapshots(userId, String(applicationB._id));
+      expect(snapshotsOnA.map((s) => String(s._id))).toEqual([String(snapshotA._id)]);
+      expect(snapshotsOnB.map((s) => String(s._id))).toEqual([String(snapshotB._id)]);
+
+      // Fetching B's snapshot/requirement/task/deadline scoped under A must 404, not silently return it.
+      await expect(getSnapshot(userId, String(applicationA._id), String(snapshotB._id))).rejects.toThrow(
+        NotFoundError,
+      );
+    });
+
+    it('ownership restrictions continue to apply to every sibling application and its children', async () => {
+      const journey = await makeJourney();
+      const applicationA = await createApplication(userId, { journeyId: String(journey._id), title: 'Admission' });
+      const applicationB = await createApplication(userId, { journeyId: String(journey._id), title: 'Funding' });
+
+      await expect(getApplicationOwnedOrThrow(String(applicationA._id), otherUserId)).rejects.toThrow(
+        NotFoundError,
+      );
+      await expect(getApplicationOwnedOrThrow(String(applicationB._id), otherUserId)).rejects.toThrow(
+        NotFoundError,
+      );
+      await expect(
+        updateApplication(String(applicationB._id), otherUserId, { status: ApplicationStatus.SUBMITTED }),
+      ).rejects.toThrow(NotFoundError);
+
+      // listApplicationsForUser for the other user never leaks either sibling.
+      const otherUsersPage = await listApplicationsForUser(otherUserId, undefined, {});
+      expect(otherUsersPage.items).toEqual([]);
     });
   });
 });

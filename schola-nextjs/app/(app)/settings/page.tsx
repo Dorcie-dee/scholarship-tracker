@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, friendlyErrorMessage } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { formatDate, relativeDays } from '@/lib/status';
-import { Button } from '@/components/ui/button';
+import { Button, iconButtonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { FieldError, Input, Label } from '@/components/ui/form';
 import { Pill } from '@/components/ui/pill';
@@ -116,18 +116,30 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6 sm:py-10">
       <div>
-        <h1 className="font-display text-2xl font-semibold text-ink sm:text-3xl">Account settings</h1>
-        <p className="mt-1.5 text-sm text-ink-soft">Manage your account, active sessions, and data.</p>
+        <h1 className="font-display text-page-title font-semibold text-ink sm:text-page-title-lg">Account settings</h1>
+        <p className="mt-1.5 text-supporting text-ink-soft">Manage your account, active sessions, and data.</p>
       </div>
 
       {/* Account info */}
       <Card className="mt-6 p-5 sm:p-6">
-        <h2 className="font-display text-lg font-semibold text-ink">Account</h2>
+        <h2 className="font-display text-card-title font-semibold text-ink">Account</h2>
 
         {userQuery.isLoading ? (
-          <p className="mt-3 text-sm text-ink-faint">Loading…</p>
+          <dl className="mt-4 flex flex-col divide-y divide-line-soft" aria-busy="true" aria-label="Loading account details">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+                <div className="h-3.5 w-24 animate-pulse rounded bg-line-soft" />
+                <div className="h-3.5 w-32 animate-pulse rounded bg-line-soft" />
+              </div>
+            ))}
+          </dl>
         ) : userQuery.isError ? (
-          <p className="mt-3 text-sm text-danger">{friendlyErrorMessage(userQuery.error)}</p>
+          <div className="mt-3 flex flex-col items-start gap-3">
+            <p className="text-sm text-danger">{friendlyErrorMessage(userQuery.error)}</p>
+            <Button size="sm" variant="secondary" onClick={() => userQuery.refetch()}>
+              Try again
+            </Button>
+          </div>
         ) : (
           userQuery.data && (
             <dl className="mt-4 flex flex-col divide-y divide-line-soft">
@@ -179,7 +191,7 @@ export default function SettingsPage() {
                           setNameDraft(userQuery.data.name ?? '');
                           setEditingName(true);
                         }}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-faint hover:bg-line-soft hover:text-ink"
+                        className={iconButtonVariants()}
                       >
                         <PencilIcon size={14} aria-hidden="true" />
                       </button>
@@ -220,16 +232,25 @@ export default function SettingsPage() {
       <Card className="mt-6 p-5 sm:p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="font-display text-lg font-semibold text-ink">Active sessions</h2>
+            <h2 className="font-display text-card-title font-semibold text-ink">Active sessions</h2>
             <p className="mt-0.5 text-sm text-ink-soft">Devices currently signed in to your account.</p>
           </div>
         </div>
 
         <div className="mt-4 flex flex-col gap-2">
           {sessionsQuery.isLoading ? (
-            <p className="text-sm text-ink-faint">Loading…</p>
+            <div className="flex flex-col gap-2" aria-busy="true" aria-label="Loading sessions">
+              {[0, 1].map((i) => (
+                <div key={i} className="h-14 animate-pulse rounded-lg border border-line-soft bg-line-soft/40" />
+              ))}
+            </div>
           ) : sessionsQuery.isError ? (
-            <p className="text-sm text-danger">{friendlyErrorMessage(sessionsQuery.error)}</p>
+            <div className="flex flex-col items-start gap-3">
+              <p className="text-sm text-danger">{friendlyErrorMessage(sessionsQuery.error)}</p>
+              <Button size="sm" variant="secondary" onClick={() => sessionsQuery.refetch()}>
+                Try again
+              </Button>
+            </div>
           ) : sessionsQuery.data && sessionsQuery.data.length > 0 ? (
             sessionsQuery.data.map((session) => (
               <div key={session.id} className="rounded-lg border border-line-soft px-4 py-3">
@@ -273,7 +294,7 @@ export default function SettingsPage() {
             <AlertCircleIcon size={18} aria-hidden="true" />
           </span>
           <div>
-            <h2 className="font-display text-lg font-semibold text-ink">Danger zone</h2>
+            <h2 className="font-display text-card-title font-semibold text-ink">Danger zone</h2>
             <p className="mt-0.5 text-sm text-ink-soft">
               Deleting your account permanently erases your profile, applications, tasks, requirements, deadlines,
               uploaded documents, and login sessions. This happens immediately and can't be undone.

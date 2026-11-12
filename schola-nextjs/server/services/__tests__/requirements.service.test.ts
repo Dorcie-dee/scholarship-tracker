@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Types } from 'mongoose';
 import { Opportunity } from '../../models/opportunity.model';
+import { Requirement } from '../../models/requirement.model';
 import { ApplicantProfile } from '../../models/applicant-profile.model';
 import { RequirementStatus, RequirementSuggestionSource, RequirementType } from '../../lib/enums';
 import { BadRequestError, ConflictError, NotFoundError } from '../../lib/http-errors';
@@ -46,14 +47,25 @@ describe('requirements.service', () => {
       expect(result.items).toEqual([]);
     });
 
-    it('creates fine when only opportunityId is given (shared catalog data)', async () => {
-      const opportunity = await Opportunity.create({ title: 'Fulbright' });
+    it('creates fine when only opportunityId is given, for an opportunity the caller owns', async () => {
+      const opportunity = await Opportunity.create({ ownerId: userId, title: 'Fulbright' });
       const requirement = await createRequirement(userId, {
         requirementType: RequirementType.GPA,
         description: 'GPA >= 3.5',
         opportunityId: String(opportunity._id),
       });
       expect(String(requirement.opportunityId)).toBe(String(opportunity._id));
+    });
+
+    it('404s linking to an opportunity owned by another user', async () => {
+      const opportunity = await Opportunity.create({ ownerId: otherUserId, title: 'Theirs' });
+      await expect(
+        createRequirement(userId, {
+          requirementType: RequirementType.GPA,
+          description: 'GPA >= 3.5',
+          opportunityId: String(opportunity._id),
+        }),
+      ).rejects.toThrow(NotFoundError);
     });
 
     it('404s linking to an application owned by another user', async () => {
@@ -151,7 +163,7 @@ describe('requirements.service', () => {
     });
 
     it('rejects suggesting for an opportunity-only (non-application) requirement', async () => {
-      const opportunity = await Opportunity.create({ title: 'Fulbright' });
+      const opportunity = await Opportunity.create({ ownerId: userId, title: 'Fulbright' });
       const requirement = await createRequirement(userId, {
         requirementType: RequirementType.LANGUAGE,
         description: 'IELTS 6.5+',
@@ -224,12 +236,24 @@ describe('requirements.service', () => {
       expect(result.items).toEqual([]);
     });
 
-    it('excludes opportunity-only requirements not yet attached to any application', async () => {
-      const opportunity = await Opportunity.create({ title: 'Fulbright' });
-      await createRequirement(userId, {
+    it('includes opportunity-only requirements for an opportunity the caller owns, even with no application yet', async () => {
+      const opportunity = await Opportunity.create({ ownerId: userId, title: 'Fulbright' });
+      const requirement = await createRequirement(userId, {
         requirementType: RequirementType.GPA,
         description: 'GPA >= 3.5',
         opportunityId: String(opportunity._id),
+      });
+
+      const result = await listRequirements(userId, {}, {});
+      expect(result.items.map((r) => String(r._id))).toEqual([String(requirement._id)]);
+    });
+
+    it('excludes an opportunity-only requirement belonging to another user\'s opportunity', async () => {
+      const otherOpportunity = await Opportunity.create({ ownerId: otherUserId, title: 'Theirs' });
+      await Requirement.create({
+        requirementType: RequirementType.GPA,
+        description: 'GPA >= 3.5',
+        opportunityId: otherOpportunity._id,
       });
 
       const result = await listRequirements(userId, {}, {});

@@ -152,6 +152,17 @@ export interface AppConfig {
    * secret, so they're safe-by-default until explicitly configured.
    */
   cron: { secret: string };
+  /**
+   * Gates `/api/auth/setup-admin` — the only way to create the platform's
+   * first administrator account (there is no "first user becomes admin"
+   * magic, and no admin-creation path exists in the regular UI). Same
+   * no-fallback, safe-by-default shape as `cron.secret`: unset means the
+   * route always rejects. The service layer additionally refuses to run
+   * this at all once any admin already exists, so leaking this value after
+   * first use has no further effect — rotate or unset it once you've
+   * created your first admin, as a matter of hygiene rather than necessity.
+   */
+  adminSetup: { secret: string };
 }
 
 let cached: AppConfig | null = null;
@@ -226,6 +237,9 @@ export function getConfig(): AppConfig {
     },
     cron: {
       secret: process.env.CRON_SECRET ?? '',
+    },
+    adminSetup: {
+      secret: process.env.ADMIN_SETUP_SECRET ?? '',
     },
   };
   return cached;

@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState, type ComponentType } from 'react';
 import { cn } from '@/lib/cn';
 import { useAuth } from '@/lib/auth-context';
+import { Drawer } from '@/components/ui/drawer';
 import {
   ApplicationsIcon,
   ArrowLeftIcon,
@@ -12,23 +13,24 @@ import {
   type IconProps,
   LockIcon,
   LogOutIcon,
-  MenuIcon,
+  MoreIcon,
   SearchIcon,
+  SettingsIcon,
   UserIcon,
-  XIcon,
 } from '@/components/icons';
 
-const NAV_ITEMS: Array<{ href: string; label: string; icon: ComponentType<IconProps> }> = [
-  { href: '/dashboard', label: 'Dashboard', icon: HomeIcon },
-  { href: '/applications', label: 'My applications', icon: ApplicationsIcon },
-  { href: '/discover', label: 'Discover', icon: SearchIcon },
-  { href: '/profile', label: 'Profile', icon: UserIcon },
+const NAV_ITEMS: Array<{ href: string; label: string; shortLabel: string; icon: ComponentType<IconProps> }> = [
+  { href: '/dashboard', label: 'Dashboard', shortLabel: 'Dashboard', icon: HomeIcon },
+  { href: '/applications', label: 'My applications', shortLabel: 'Applications', icon: ApplicationsIcon },
+  { href: '/opportunities', label: 'My opportunities', shortLabel: 'Opportunities', icon: SearchIcon },
+  { href: '/profile', label: 'Profile', shortLabel: 'Profile', icon: UserIcon },
 ];
 
 /** Only shown to admins — appended in `SidebarContents` rather than kept in `NAV_ITEMS` itself, so that static array stays the same for every other user. */
-const ADMIN_NAV_ITEM: { href: string; label: string; icon: ComponentType<IconProps> } = {
+const ADMIN_NAV_ITEM: { href: string; label: string; shortLabel: string; icon: ComponentType<IconProps> } = {
   href: '/admin',
   label: 'Admin',
+  shortLabel: 'Admin',
   icon: LockIcon,
 };
 
@@ -57,6 +59,7 @@ function NavLink({
     <Link
       href={item.href}
       onClick={onNavigate}
+      aria-current={active ? 'page' : undefined}
       aria-label={collapsed ? item.label : undefined}
       title={collapsed ? item.label : undefined}
       className={cn(
@@ -163,13 +166,80 @@ function SidebarContents({
   );
 }
 
+/** One row inside the mobile "More" sheet — Settings/Admin/Sign out: the
+ * destinations that don't fit in the 4-slot bottom nav. Deliberately plainer
+ * than `NavLink` (no collapsed/tooltip mode to support, since the sheet is
+ * always full-width). */
+function MoreSheetLink({
+  href,
+  icon: Icon,
+  label,
+  onNavigate,
+}: {
+  href: string;
+  icon: ComponentType<IconProps>;
+  label: string;
+  onNavigate: () => void;
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-ink-soft transition-colors hover:bg-line-soft hover:text-ink"
+    >
+      <Icon size={20} className="flex-none" aria-hidden="true" />
+      {label}
+    </Link>
+  );
+}
+
+/** The persistent mobile primary nav — replaces a hamburger-and-drawer as
+ * the default below `md`. Same four destinations as the desktop/tablet
+ * rail, same `aria-current`; just a different presentation. */
+function BottomNav() {
+  const pathname = usePathname();
+  return (
+    <nav
+      aria-label="Main"
+      className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] md:hidden"
+    >
+      {NAV_ITEMS.map((item) => {
+        const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+        const Icon = item.icon;
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            aria-current={active ? 'page' : undefined}
+            className={cn(
+              'flex min-h-[44px] flex-1 flex-col items-center justify-center gap-0.5 px-2 py-2 text-[11px] font-semibold transition-colors',
+              active ? 'text-primary' : 'text-ink-faint hover:text-ink-soft',
+            )}
+          >
+            <Icon size={22} aria-hidden="true" />
+            <span className="truncate">{item.shortLabel}</span>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const pathname = usePathname();
+  const { user, logout } = useAuth();
 
   useEffect(() => {
     try {
+      // Deliberately deferred to an effect, not a lazy useState initializer:
+      // localStorage doesn't exist during SSR, so reading it synchronously
+      // during render would mismatch the server-rendered markup. This one
+      // extra render (expanded, then possibly collapsed) is the standard
+      // trade-off for persisting client-only state without a hydration
+      // mismatch, not an unintentional cascading-render bug.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCollapsed(localStorage.getItem(COLLAPSE_KEY) === '1');
     } catch {
       // Storage unavailable (private browsing, etc.) — default stays expanded.
@@ -177,27 +247,11 @@ export function Sidebar() {
   }, []);
 
   useEffect(() => {
-    setMobileOpen(false);
+    // Same trade-off as above: closes the "More" sheet after a navigation
+    // triggered from inside it, which only `pathname` changing can detect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMoreOpen(false);
   }, [pathname]);
-
-  // Lock background scroll while the mobile drawer is open.
-  useEffect(() => {
-    if (!mobileOpen) return;
-    const original = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = original;
-    };
-  }, [mobileOpen]);
-
-  useEffect(() => {
-    if (!mobileOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMobileOpen(false);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [mobileOpen]);
 
   function toggleCollapsed() {
     setCollapsed((prev) => {
@@ -213,8 +267,10 @@ export function Sidebar() {
 
   return (
     <>
-      {/* Mobile top bar */}
-      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-surface px-4 py-3 lg:hidden">
+      {/* Mobile top bar — paired with `BottomNav` below `md`. Its one action
+          is "More": Settings/Admin/Sign out, the destinations that don't fit
+          in the bottom nav's 4 primary slots. */}
+      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-surface px-4 py-3 md:hidden">
         <Link href="/dashboard" className="flex items-center gap-2">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary font-display text-sm font-bold text-white">
             S
@@ -223,38 +279,41 @@ export function Sidebar() {
         </Link>
         <button
           type="button"
-          onClick={() => setMobileOpen(true)}
-          aria-label="Open navigation menu"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
           className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-soft hover:bg-line-soft"
         >
-          <MenuIcon size={22} aria-hidden="true" />
+          <MoreIcon size={22} aria-hidden="true" />
         </button>
       </header>
 
-      {/* Mobile drawer */}
-      {mobileOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden">
+      <Drawer open={moreOpen} onClose={() => setMoreOpen(false)} title="More">
+        <nav aria-label="More" className="flex flex-col gap-1">
+          <MoreSheetLink href="/settings" icon={SettingsIcon} label="Settings" onNavigate={() => setMoreOpen(false)} />
+          {user?.role === 'admin' && (
+            <MoreSheetLink href="/admin" icon={LockIcon} label="Admin" onNavigate={() => setMoreOpen(false)} />
+          )}
           <button
             type="button"
-            aria-label="Close navigation menu"
-            onClick={() => setMobileOpen(false)}
-            className="absolute inset-0 bg-ink/40"
-          />
-          <div className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-surface shadow-popover">
-            <div className="flex justify-end px-3 pt-3">
-              <button
-                type="button"
-                onClick={() => setMobileOpen(false)}
-                aria-label="Close navigation menu"
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-soft hover:bg-line-soft"
-              >
-                <XIcon size={20} aria-hidden="true" />
-              </button>
-            </div>
-            <SidebarContents collapsed={false} showCollapseToggle={false} onNavigate={() => setMobileOpen(false)} />
-          </div>
-        </div>
-      )}
+            onClick={() => void logout()}
+            className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-ink-soft transition-colors hover:bg-line-soft hover:text-ink"
+          >
+            <LogOutIcon size={20} className="flex-none" aria-hidden="true" />
+            Sign out
+          </button>
+        </nav>
+      </Drawer>
+
+      <BottomNav />
+
+      {/* Tablet rail — icon-only, no expand/collapse toggle: at this width
+          there isn't enough room for a labeled rail, and a mid-breakpoint
+          toggle would be one more piece of state to explain for a range
+          users pass through on their way to desktop. Tooltips on hover/focus
+          (built into `NavLink`'s collapsed mode) carry the labels instead. */}
+      <aside className="sticky top-0 hidden h-dvh w-20 flex-none border-r border-line bg-surface md:flex lg:hidden">
+        <SidebarContents collapsed showCollapseToggle={false} />
+      </aside>
 
       {/* Desktop rail — sticky + independently scrollable, so it never loses
           its footing while the page content scrolls past it. */}

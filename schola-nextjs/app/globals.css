@@ -6,11 +6,23 @@
   --color-ink-faint: #8c8781;
   --color-paper: #fdfcfb;
   --color-surface: #ffffff;
+  /* Reserved for raised-above-the-page surfaces (Phase 3's drawer/dialog) —
+     same hue as `surface` today; kept as its own token rather than reusing
+     `surface` so an elevated plane can be told apart from a flat card later
+     without hunting down every call site. */
+  --color-surface-elevated: #ffffff;
   --color-line: #e7e4df;
   --color-line-soft: #f3f1ed;
+  /* Backdrop tint for the Phase 3 drawer/dialog overlay. Token only — no
+     component uses it yet. */
+  --color-overlay: rgb(28 25 23 / 45%);
 
   --color-primary: #3730a3;
   --color-primary-hover: #2e2a85;
+  /* Pressed/active state — distinct from `-hover`, deliberately one step
+     darker. Not wired into `Button` yet; that's Phase 2 (shared interaction
+     states), kept to tokens only here. */
+  --color-primary-active: #241f6e;
   --color-primary-soft: #eeeefc;
 
   --color-accent: #b6540a;
@@ -22,9 +34,50 @@
   --color-warning-soft: #fff6e8;
   --color-danger: #b91c1c;
   --color-danger-soft: #fdecec;
+  /* New — closes a real gap: `Toast`'s "info" tone previously had nothing
+     of its own and borrowed `primary-soft`/`primary`. Token only for now;
+     migrating `Toast` onto it is Phase 2 (shared component states), not
+     done here. */
+  --color-info: #1d4ed8;
+  --color-info-soft: #eaf1fd;
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-fraunces), ui-serif, Georgia, serif;
+
+  /*
+   * Formal type scale — named by ROLE, not by raw size, so a page states
+   * intent ("this is a section heading") instead of repeating a literal
+   * `text-lg font-semibold` string. Mirrors the sizes already in use across
+   * the app today (confirmed via audit: `text-2xl sm:text-3xl` for every
+   * page h1, `text-lg` for every section h2) rather than inventing new
+   * ones — this formalizes the existing scale, it doesn't replace it.
+   * `subsection`/`card-title` are new: the audit found zero `<h3>` anywhere
+   * in the app, with subsection titles faked visually via styled `<p>`.
+   */
+  --text-display: 1.75rem;
+  --text-display--line-height: 1.2;
+  --text-page-title: 1.5rem;
+  --text-page-title--line-height: 1.3;
+  --text-page-title-lg: 1.875rem;
+  --text-page-title-lg--line-height: 1.25;
+  --text-section-heading: 1.125rem;
+  --text-section-heading--line-height: 1.4;
+  --text-subsection-heading: 1rem;
+  --text-subsection-heading--line-height: 1.4;
+  --text-card-title: 0.9375rem;
+  --text-card-title--line-height: 1.3;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.6;
+  --text-supporting: 0.875rem;
+  --text-supporting--line-height: 1.55;
+  --text-label: 0.75rem;
+  --text-label--line-height: 1.4;
+  --text-meta: 0.75rem;
+  --text-meta--line-height: 1.4;
+  --text-nav: 0.875rem;
+  --text-nav--line-height: 1.3;
+  --text-button: 0.875rem;
+  --text-button--line-height: 1.2;
 
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -32,6 +85,9 @@
 
   --shadow-card: 0 1px 2px rgba(28, 25, 23, 0.04);
   --shadow-popover: 0 12px 32px rgba(28, 25, 23, 0.12);
+  /* Stronger elevation for Phase 3's drawer/dialog surfaces — token only,
+     not consumed anywhere yet. */
+  --shadow-elevated: 0 20px 48px rgba(28, 25, 23, 0.16);
 }
 
 @layer base {
@@ -50,7 +106,8 @@
   }
   h1,
   h2,
-  h3 {
+  h3,
+  h4 {
     font-family: var(--font-display);
     letter-spacing: -0.01em;
   }
@@ -84,5 +141,75 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* Phase 3: the shared drawer/sheet (see `components/ui/drawer.tsx`) — a
+   native <dialog>, so entry/exit chrome (top-layer, inert background,
+   Escape-to-close, ::backdrop) comes from the platform rather than a new
+   dependency. Only the entrance is animated; closing is instant, since
+   animating a dialog's removal needs deferring `close()` until a
+   transitionend, which is real fragility for a cosmetic-only gain. A
+   bottom sheet below `sm`, a right-side panel from `sm` up. */
+.drawer-panel {
+  position: fixed;
+  inset: auto 0 0 0;
+  width: 100%;
+  max-height: 90dvh;
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+  background: var(--color-surface-elevated);
+  box-shadow: var(--shadow-elevated);
+  translate: 0 100%;
+  opacity: 0;
+  transition:
+    translate 0.22s ease,
+    opacity 0.22s ease,
+    overlay 0.22s allow-discrete,
+    display 0.22s allow-discrete;
+}
+.drawer-panel[open] {
+  translate: 0 0;
+  opacity: 1;
+}
+@starting-style {
+  .drawer-panel[open] {
+    translate: 0 100%;
+    opacity: 0;
+  }
+}
+.drawer-panel::backdrop {
+  background: var(--color-overlay);
+  opacity: 0;
+  transition:
+    opacity 0.22s ease,
+    overlay 0.22s allow-discrete,
+    display 0.22s allow-discrete;
+}
+.drawer-panel[open]::backdrop {
+  opacity: 1;
+}
+@starting-style {
+  .drawer-panel[open]::backdrop {
+    opacity: 0;
+  }
+}
+@media (min-width: 640px) {
+  .drawer-panel {
+    inset: 0 0 0 auto;
+    height: 100dvh;
+    max-height: 100dvh;
+    width: 100%;
+    max-width: 28rem;
+    border-radius: 0;
+    translate: 100% 0;
+  }
+  .drawer-panel[open] {
+    translate: 0 0;
+  }
+  @starting-style {
+    .drawer-panel[open] {
+      translate: 100% 0;
+    }
   }
 }

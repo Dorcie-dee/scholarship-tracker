@@ -48,7 +48,7 @@ function ResetPasswordForm() {
           <CheckIcon size={22} aria-hidden="true" />
         </span>
         <div>
-          <h1 className="font-display text-2xl font-semibold text-ink">Password reset</h1>
+          <h1 className="font-display text-page-title font-semibold text-ink">Password reset</h1>
           <p className="mt-2 text-sm text-ink-soft">Your password has been changed. Log in with your new password.</p>
         </div>
         <Button onClick={() => router.push('/login')}>Go to login</Button>
@@ -59,7 +59,7 @@ function ResetPasswordForm() {
   return (
     <div className="flex flex-col gap-7">
       <div>
-        <h1 className="font-display text-2xl font-semibold text-ink">Choose a new password</h1>
+        <h1 className="font-display text-page-title font-semibold text-ink">Choose a new password</h1>
         <p className="mt-1.5 text-sm text-ink-soft">Make it something you haven&rsquo;t used here before.</p>
       </div>
 

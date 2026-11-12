@@ -2,13 +2,14 @@ import { Types, type HydratedDocument } from 'mongoose';
 import { Deadline, type DeadlineDoc } from '../models/deadline.model';
 import { Task } from '../models/task.model';
 import { Requirement } from '../models/requirement.model';
+import { Opportunity } from '../models/opportunity.model';
 import { ApplicationJourney } from '../models/application-journey.model';
 import { BadRequestError, NotFoundError } from '../lib/http-errors';
 import { paginate, type PaginatedResult } from '../lib/pagination';
 import {
   assertValidObjectId,
   findLiveApplicationIds,
-  findOpportunityOrThrow,
+  findOwnedOpportunityOrThrow,
   findOwnedApplicationOrThrow,
 } from './access';
 import { findTaskAccessible } from './tasks.service';
@@ -27,16 +28,16 @@ interface LinkFields {
 /**
  * Ported from `deadlines/deadlines.service.ts`. A Deadline can attach to any
  * combination of Opportunity/Application/Task/Requirement — ownership is
- * checked through whichever of Application/Task/Requirement is set (each of
- * those already enforces the "soft-deleted parent Application" exclusion
- * transitively); an Opportunity-only deadline is shared catalog data.
+ * checked through whichever of Opportunity/Application/Task/Requirement is
+ * set (each of those enforces its own ownership, Application additionally
+ * enforcing the "soft-deleted parent" exclusion transitively).
  *
  * Group B / I1 parity — the up to four checks are independent of each
  * other's result, so they run concurrently via `Promise.all`.
  */
 async function validateAndAuthorizeLinks(userId: string, links: LinkFields): Promise<void> {
   await Promise.all([
-    links.opportunityId ? findOpportunityOrThrow(links.opportunityId) : Promise.resolve(undefined),
+    links.opportunityId ? findOwnedOpportunityOrThrow(links.opportunityId, userId) : Promise.resolve(undefined),
     links.applicationId ? findOwnedApplicationOrThrow(links.applicationId, userId) : Promise.resolve(undefined),
     links.taskId ? findTaskAccessible(links.taskId, userId) : Promise.resolve(undefined),
     links.requirementId ? findRequirementAccessible(links.requirementId, userId) : Promise.resolve(undefined),
@@ -84,15 +85,15 @@ export async function listDeadlines(
     if (filters.requirementId) filter.requirementId = filters.requirementId;
   } else {
     // "All mine" fallback, mirroring `tasks.service.ts#listTasks`'s same
-    // pattern — every deadline reachable from something the caller owns
-    // (an application, a task, or a requirement), across every journey.
-    // Lets a dashboard compute a "due soon" feed in a handful of calls
-    // instead of one request per application.
+    // pattern — every deadline reachable from something the caller owns (an
+    // opportunity, an application, a task, or a requirement), across every
+    // journey. Lets a dashboard compute a "due soon" feed in a handful of
+    // calls instead of one request per application.
     const journeyIds = (await ApplicationJourney.find({ userId }).select('_id').lean()).map(
       (j) => j._id as Types.ObjectId,
     );
     const liveApplicationIds = await findLiveApplicationIds(journeyIds);
-    const [ownedTaskIds, ownedRequirementIds] = await Promise.all([
+    const [ownedTaskIds, ownedRequirementIds, ownedOpportunityIds] = await Promise.all([
       Task.find({ journeyId: { $in: journeyIds } })
         .select('_id')
         .lean()
@@ -101,12 +102,17 @@ export async function listDeadlines(
         .select('_id')
         .lean()
         .then((rows) => rows.map((r) => r._id as Types.ObjectId)),
+      Opportunity.find({ ownerId: userId })
+        .select('_id')
+        .lean()
+        .then((rows) => rows.map((o) => o._id as Types.ObjectId)),
     ]);
     filter = {
       $or: [
         { applicationId: { $in: liveApplicationIds } },
         { taskId: { $in: ownedTaskIds } },
         { requirementId: { $in: ownedRequirementIds } },
+        { opportunityId: { $in: ownedOpportunityIds } },
       ],
     };
   }
@@ -132,6 +138,7 @@ async function findDeadlineEntityOrThrow(id: string): Promise<HydratedDeadline> 
 export async function findDeadlineAccessible(id: string, userId: string): Promise<HydratedDeadline> {
   const deadline = await findDeadlineEntityOrThrow(id);
   await validateAndAuthorizeLinks(userId, {
+    opportunityId: deadline.opportunityId ? String(deadline.opportunityId) : undefined,
     applicationId: deadline.applicationId ? String(deadline.applicationId) : undefined,
     taskId: deadline.taskId ? String(deadline.taskId) : undefined,
     requirementId: deadline.requirementId ? String(deadline.requirementId) : undefined,

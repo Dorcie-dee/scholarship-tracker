@@ -51,6 +51,16 @@ export const registerSchema = z
   .strict();
 export type RegisterInput = z.infer<typeof registerSchema>;
 
+export const setupAdminSchema = z
+  .object({
+    email: emailSchema,
+    password: newPasswordSchema,
+    name: z.string().max(255).optional(),
+    setupSecret: z.string().min(1, 'Setup key is required'),
+  })
+  .strict();
+export type SetupAdminInput = z.infer<typeof setupAdminSchema>;
+
 export const loginSchema = z
   .object({
     email: emailSchema,

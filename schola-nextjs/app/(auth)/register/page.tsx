@@ -34,7 +34,7 @@ export default function RegisterPage() {
   return (
     <div className="flex flex-col gap-7">
       <div>
-        <h1 className="font-display text-2xl font-semibold text-ink">Start tracking today</h1>
+        <h1 className="font-display text-page-title font-semibold text-ink">Start tracking today</h1>
         <p className="mt-1.5 text-sm text-ink-soft">Takes under a minute. No credit card, ever.</p>
       </div>
 

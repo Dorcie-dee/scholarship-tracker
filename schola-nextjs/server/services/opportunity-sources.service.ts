@@ -3,6 +3,7 @@ import { OpportunitySource, type OpportunitySourceDoc } from '../models/opportun
 import { ContentOrigin } from '../lib/enums';
 import { BadRequestError, NotFoundError } from '../lib/http-errors';
 import { fetchUrlPreview, type FetchedUrlPreview } from '../lib/url-fetch';
+import { inferOpportunityFields, type OpportunityFieldSuggestions } from '../lib/opportunity-inference';
 import { paginate, type PaginatedResult } from '../lib/pagination';
 import { isValidObjectId } from '../validation/common';
 import type {
@@ -13,16 +14,29 @@ import type {
 import { getOpportunityOrThrow } from './opportunities.service';
 
 /**
- * Ported from the original NestJS backend's `OpportunitySourcesService`.
- * Full CRUD here is deliberately open to any authenticated user — NOT
- * admin-gated — since sources hang off an opportunity the caller is
- * tracking; see `docs/decisions.md`, "Catalog modules" /
- * `docs/api-reference.md`.
+ * An OpportunitySource hangs off an Opportunity the caller owns — see
+ * `opportunities.service.ts`'s doc comment. `ownerId` is denormalized onto
+ * the source itself (see `opportunity-source.model.ts`) so list/get/update/
+ * delete can be scoped directly without an extra lookup per row.
  */
 
-/** Preview a public URL for capture — network I/O only, nothing persisted. Rate-limited at the route layer. */
-export async function fetchSourcePreview(url: string): Promise<FetchedUrlPreview> {
-  return fetchUrlPreview(url);
+/**
+ * Preview a public URL for capture — network I/O only, nothing persisted.
+ * Rate-limited at the route layer. Alongside the raw fetch, runs a
+ * deterministic (non-AI) best-effort guess at opportunityType/studyLevel/
+ * country from the fetched title/excerpt — see `opportunity-inference.ts`.
+ * These are suggestions only: the frontend pre-fills them into the create
+ * form exactly like title/summary already were, never persists them
+ * directly, and the caller can freely overwrite any of them before saving.
+ */
+export async function fetchSourcePreview(url: string): Promise<FetchedUrlPreview & OpportunityFieldSuggestions> {
+  const preview = await fetchUrlPreview(url);
+  const suggestions = inferOpportunityFields({
+    title: preview.title,
+    text: preview.extractedContent,
+    finalUrl: preview.finalUrl,
+  });
+  return { ...preview, ...suggestions };
 }
 
 /**
@@ -33,9 +47,10 @@ export async function fetchSourcePreview(url: string): Promise<FetchedUrlPreview
  * something; otherwise it stays `manual`.
  */
 export async function createOpportunitySource(
+  ownerId: string,
   input: CreateOpportunitySourceInput,
 ): Promise<HydratedDocument<OpportunitySourceDoc>> {
-  await getOpportunityOrThrow(input.opportunityId);
+  await getOpportunityOrThrow(input.opportunityId, ownerId);
 
   const { autoFetch, capturedAt, publishedAt, ...fields } = input;
   let contentOrigin: ContentOrigin = ContentOrigin.MANUAL;
@@ -63,6 +78,7 @@ export async function createOpportunitySource(
 
   return OpportunitySource.create({
     ...fields,
+    ownerId,
     sourceName: sourceName ?? null,
     extractedContent: extractedContent ?? null,
     contentOrigin,
@@ -71,11 +87,12 @@ export async function createOpportunitySource(
   });
 }
 
-/** Keyset-paginated, ordered by `(capturedAt, id)` DESC (newest first). */
+/** Keyset-paginated, ordered by `(capturedAt, id)` DESC (newest first). Always scoped to the caller's own sources. */
 export async function listOpportunitySources(
+  ownerId: string,
   query: ListOpportunitySourcesQuery,
 ): Promise<PaginatedResult<HydratedDocument<OpportunitySourceDoc>>> {
-  const filter: FilterQuery<OpportunitySourceDoc> = {};
+  const filter: FilterQuery<OpportunitySourceDoc> = { ownerId };
   if (query.opportunityId) {
     filter.opportunityId = query.opportunityId;
   }
@@ -90,25 +107,27 @@ export async function listOpportunitySources(
 
 export async function getOpportunitySourceOrThrow(
   id: string,
+  ownerId: string,
 ): Promise<HydratedDocument<OpportunitySourceDoc>> {
   if (!isValidObjectId(id)) {
     throw new NotFoundError('Opportunity source not found');
   }
-  const source = await OpportunitySource.findById(id);
+  const source = await OpportunitySource.findOne({ _id: id, ownerId });
   if (!source) {
     throw new NotFoundError('Opportunity source not found');
   }
   return source;
 }
 
-/** Re-validates a newly-supplied `opportunityId` — a source cannot be silently re-parented to a nonexistent opportunity. */
+/** Re-validates a newly-supplied `opportunityId` — a source cannot be silently re-parented to an opportunity the caller doesn't own. */
 export async function updateOpportunitySource(
   id: string,
+  ownerId: string,
   input: UpdateOpportunitySourceInput,
 ): Promise<HydratedDocument<OpportunitySourceDoc>> {
-  const source = await getOpportunitySourceOrThrow(id);
+  const source = await getOpportunitySourceOrThrow(id, ownerId);
   if (input.opportunityId) {
-    await getOpportunityOrThrow(input.opportunityId);
+    await getOpportunityOrThrow(input.opportunityId, ownerId);
   }
 
   const { capturedAt, publishedAt, ...rest } = input;
@@ -123,7 +142,7 @@ export async function updateOpportunitySource(
   return source;
 }
 
-export async function deleteOpportunitySource(id: string): Promise<void> {
-  await getOpportunitySourceOrThrow(id);
-  await OpportunitySource.deleteOne({ _id: id });
+export async function deleteOpportunitySource(id: string, ownerId: string): Promise<void> {
+  await getOpportunitySourceOrThrow(id, ownerId);
+  await OpportunitySource.deleteOne({ _id: id, ownerId });
 }

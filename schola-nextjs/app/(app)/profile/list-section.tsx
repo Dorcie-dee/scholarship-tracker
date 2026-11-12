@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { Button, iconButtonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { FieldError, Input, Label, Textarea } from '@/components/ui/form';
 import { PencilIcon, PlusIcon, TrashIcon, type IconProps } from '@/components/icons';
@@ -110,7 +110,7 @@ export function ListSection<T extends object>({
             <Icon size={18} aria-hidden="true" />
           </span>
           <div>
-            <h2 className="font-display text-lg font-semibold text-ink">{title}</h2>
+            <h2 className="font-display text-card-title font-semibold text-ink">{title}</h2>
             <p className="mt-0.5 text-sm text-ink-soft">{description}</p>
           </div>
         </div>
@@ -174,7 +174,7 @@ export function ListSection<T extends object>({
                     onClick={() => startEdit(index)}
                     aria-label={`Edit ${primary || title.toLowerCase()} entry`}
                     disabled={editingIndex !== null || saving}
-                    className="flex h-8 w-8 items-center justify-center rounded-md text-ink-faint hover:bg-line-soft hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+                    className={iconButtonVariants()}
                   >
                     <PencilIcon size={15} aria-hidden="true" />
                   </button>
@@ -183,7 +183,7 @@ export function ListSection<T extends object>({
                     onClick={() => setRemovingIndex(index)}
                     aria-label={`Remove ${primary || title.toLowerCase()} entry`}
                     disabled={editingIndex !== null || saving}
-                    className="flex h-8 w-8 items-center justify-center rounded-md text-ink-faint hover:bg-danger-soft hover:text-danger disabled:pointer-events-none disabled:opacity-40"
+                    className={iconButtonVariants({ tone: 'danger' })}
                   >
                     <TrashIcon size={15} aria-hidden="true" />
                   </button>

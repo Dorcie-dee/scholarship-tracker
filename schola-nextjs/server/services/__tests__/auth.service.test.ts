@@ -1,13 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { User } from '../../models/user.model';
 import { ApplicantProfile } from '../../models/applicant-profile.model';
 import { RefreshSession } from '../../models/refresh-session.model';
 import { EmailVerificationOtp } from '../../models/email-verification-otp.model';
 import { hashOpaqueToken } from '../../lib/auth';
-import { getConfig } from '../../lib/config';
+import { getConfig, resetConfigCache } from '../../lib/config';
 import { ConflictError, TooManyRequestsError, UnauthorizedError } from '../../lib/http-errors';
 import { UserRole } from '../../lib/enums';
-import { login, refresh, register } from '../auth.service';
+import { login, refresh, register, setupAdmin } from '../auth.service';
 import type { RequestMeta } from '../auth.service';
 
 const meta: RequestMeta = { userAgent: 'vitest', ipAddress: '127.0.0.1' };
@@ -126,5 +126,81 @@ describe('auth.service', () => {
     await expect(login('lockout@example.com', 'CorrectHorse1!', meta)).rejects.toThrow(
       TooManyRequestsError,
     );
+  });
+});
+
+describe('setupAdmin', () => {
+  const originalSecret = process.env.ADMIN_SETUP_SECRET;
+  const SECRET = 'a-real-admin-setup-secret-that-is-reasonably-long';
+
+  afterEach(() => {
+    if (originalSecret === undefined) {
+      delete process.env.ADMIN_SETUP_SECRET;
+    } else {
+      process.env.ADMIN_SETUP_SECRET = originalSecret;
+    }
+    resetConfigCache();
+  });
+
+  it('rejects when ADMIN_SETUP_SECRET is not configured, regardless of what is presented', async () => {
+    delete process.env.ADMIN_SETUP_SECRET;
+    resetConfigCache();
+
+    await expect(
+      setupAdmin({ email: 'admin@example.com', password: 'CorrectHorse1!', setupSecret: 'anything' }, meta),
+    ).rejects.toThrow(UnauthorizedError);
+  });
+
+  it('rejects a wrong setup key', async () => {
+    process.env.ADMIN_SETUP_SECRET = SECRET;
+    resetConfigCache();
+
+    await expect(
+      setupAdmin({ email: 'admin@example.com', password: 'CorrectHorse1!', setupSecret: 'wrong' }, meta),
+    ).rejects.toThrow(UnauthorizedError);
+  });
+
+  it('creates a verified admin and issues tokens when the setup key matches', async () => {
+    process.env.ADMIN_SETUP_SECRET = SECRET;
+    resetConfigCache();
+
+    const { user, tokens } = await setupAdmin(
+      { email: 'first-admin@example.com', password: 'CorrectHorse1!', name: 'First Admin', setupSecret: SECRET },
+      meta,
+    );
+
+    expect(user.role).toBe(UserRole.ADMIN);
+    expect(user.isVerified).toBe(true);
+    expect(tokens.accessToken).toBeTypeOf('string');
+
+    const dbUser = await User.findOne({ email: 'first-admin@example.com' });
+    expect(dbUser!.role).toBe(UserRole.ADMIN);
+
+    const profile = await ApplicantProfile.findOne({ userId: dbUser!._id });
+    expect(profile).not.toBeNull();
+  });
+
+  it('refuses to run once an admin already exists, even with the correct setup key', async () => {
+    process.env.ADMIN_SETUP_SECRET = SECRET;
+    resetConfigCache();
+
+    await setupAdmin(
+      { email: 'already-admin@example.com', password: 'CorrectHorse1!', setupSecret: SECRET },
+      meta,
+    );
+
+    await expect(
+      setupAdmin({ email: 'second-admin@example.com', password: 'CorrectHorse1!', setupSecret: SECRET }, meta),
+    ).rejects.toThrow(ConflictError);
+  });
+
+  it('rejects an email that is already registered', async () => {
+    process.env.ADMIN_SETUP_SECRET = SECRET;
+    resetConfigCache();
+    await register({ email: 'taken@example.com', password: 'CorrectHorse1!' }, meta);
+
+    await expect(
+      setupAdmin({ email: 'taken@example.com', password: 'CorrectHorse1!', setupSecret: SECRET }, meta),
+    ).rejects.toThrow(ConflictError);
   });
 });
