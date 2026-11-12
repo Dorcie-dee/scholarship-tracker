@@ -1,0 +1,50 @@
+{
+  "name": "schola-nextjs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^5.5.2",
+    "@ant-design/v5-patch-for-react-19": "^1.0.3",
+    "@tanstack/react-query": "^5.62.7",
+    "antd": "^5.22.5",
+    "bcryptjs": "^2.4.3",
+    "cloudinary": "^2.5.1",
+    "dayjs": "^1.11.13",
+    "jose": "^5.9.6",
+    "mongoose": "^8.8.0",
+    "next": "16.3.0",
+    "nodemailer": "^6.9.16",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/jest-dom": "^6.6.2",
+    "@testing-library/react": "^16.0.1",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20",
+    "@types/nodemailer": "^6.4.16",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "^25.0.1",
+    "mongodb-memory-server": "^10.1.2",
+    "tailwindcss": "^4",
+    "tsx": "^4.19.2",
+    "typescript": "^5",
+    "vitest": "^2.1.4"
+  },
+  "packageManager": "yarn@1.22.22"
+}

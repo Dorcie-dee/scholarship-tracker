@@ -1,0 +1,139 @@
+import { Types, type HydratedDocument } from 'mongoose';
+import { Requirement, type RequirementDoc } from '../models/requirement.model';
+import { ApplicationJourney } from '../models/application-journey.model';
+import { paginate, type PaginatedResult } from '../lib/pagination';
+import { BadRequestError, NotFoundError } from '../lib/http-errors';
+import {
+  assertApplicationOwnedByUser,
+  assertValidObjectId,
+  findLiveApplicationIds,
+  findOwnedOpportunityOrThrow,
+} from './access';
+import { Opportunity } from '../models/opportunity.model';
+import type { CreateRequirementInput, UpdateRequirementInput } from '../validation/requirements';
+
+/**
+ * Ported from `requirements/requirements.service.ts`. A Requirement can be
+ * scoped to an Opportunity (personal workspace data — ownership enforced via
+ * `access.ts`), an Application (also user-owned), or both.
+ */
+
+export async function createRequirement(
+  userId: string,
+  input: CreateRequirementInput,
+): Promise<HydratedDocument<RequirementDoc>> {
+  if (!input.opportunityId && !input.applicationId) {
+    throw new BadRequestError(
+      'A requirement must be linked to an opportunityId and/or applicationId',
+    );
+  }
+  if (input.opportunityId) {
+    await findOwnedOpportunityOrThrow(input.opportunityId, userId);
+  }
+  if (input.applicationId) {
+    await assertApplicationOwnedByUser(input.applicationId, userId);
+  }
+
+  return Requirement.create({
+    requirementType: input.requirementType,
+    description: input.description,
+    status: input.status,
+    opportunityId: input.opportunityId ?? null,
+    applicationId: input.applicationId ?? null,
+    notes: input.notes ?? null,
+  });
+}
+
+export async function listRequirements(
+  userId: string,
+  filters: { opportunityId?: string; applicationId?: string },
+  query: { cursor?: string | null; limit?: string | number | null; order?: 'asc' | 'desc' },
+): Promise<PaginatedResult<HydratedDocument<RequirementDoc>>> {
+  if (filters.applicationId) {
+    await assertApplicationOwnedByUser(filters.applicationId, userId);
+  }
+
+  const filter: Record<string, unknown> = {};
+  if (filters.opportunityId) filter.opportunityId = filters.opportunityId;
+  if (filters.applicationId) filter.applicationId = filters.applicationId;
+
+  if (!filters.opportunityId && !filters.applicationId) {
+    // "All mine" fallback, mirroring `tasks.service.ts#listTasks`'s same
+    // pattern — every requirement attached to one of the caller's own (live)
+    // applications OR one of the caller's own opportunities, across every
+    // journey. Lets a dashboard compute every application's
+    // requirement-completion progress in one call instead of one request
+    // per application.
+    const [journeyIds, ownedOpportunityIds] = await Promise.all([
+      ApplicationJourney.find({ userId })
+        .select('_id')
+        .lean()
+        .then((rows) => rows.map((j) => j._id as Types.ObjectId)),
+      Opportunity.find({ ownerId: userId })
+        .select('_id')
+        .lean()
+        .then((rows) => rows.map((o) => o._id as Types.ObjectId)),
+    ]);
+    const liveApplicationIds = await findLiveApplicationIds(journeyIds);
+    filter.$or = [
+      { applicationId: { $in: liveApplicationIds } },
+      { opportunityId: { $in: ownedOpportunityIds } },
+    ];
+  }
+
+  return paginate(Requirement, {
+    filter,
+    sortField: 'createdAt',
+    sortOrder: query.order === 'desc' ? 'desc' : 'asc',
+    cursor: query.cursor,
+    limit: query.limit,
+  });
+}
+
+async function findRequirementEntityOrThrow(id: string): Promise<HydratedDocument<RequirementDoc>> {
+  assertValidObjectId(id, 'Requirement');
+  const requirement = await Requirement.findById(id);
+  if (!requirement) {
+    throw new NotFoundError('Requirement not found');
+  }
+  return requirement as HydratedDocument<RequirementDoc>;
+}
+
+/**
+ * Used by this module's own routes AND by Tasks/Deadlines services (which
+ * accept a `requirementId` link) — exactly like the original's
+ * `findOneAccessible()`, which other services also called directly.
+ */
+export async function findRequirementAccessible(
+  id: string,
+  userId: string,
+): Promise<HydratedDocument<RequirementDoc>> {
+  const requirement = await findRequirementEntityOrThrow(id);
+  if (requirement.applicationId) {
+    await assertApplicationOwnedByUser(String(requirement.applicationId), userId);
+  } else if (requirement.opportunityId) {
+    await findOwnedOpportunityOrThrow(String(requirement.opportunityId), userId);
+  }
+  return requirement;
+}
+
+export async function updateRequirement(
+  id: string,
+  userId: string,
+  input: UpdateRequirementInput,
+): Promise<HydratedDocument<RequirementDoc>> {
+  const requirement = await findRequirementAccessible(id, userId);
+  if (input.opportunityId) {
+    await findOwnedOpportunityOrThrow(input.opportunityId, userId);
+  }
+  if (input.applicationId) {
+    await assertApplicationOwnedByUser(input.applicationId, userId);
+  }
+  Object.assign(requirement, input);
+  return requirement.save();
+}
+
+export async function removeRequirement(id: string, userId: string): Promise<void> {
+  await findRequirementAccessible(id, userId);
+  await Requirement.deleteOne({ _id: id });
+}

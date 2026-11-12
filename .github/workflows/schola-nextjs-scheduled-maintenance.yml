@@ -1,0 +1,46 @@
+name: schola-nextjs scheduled maintenance
+
+# Calls the two /api/cron/* endpoints (server/lib/cron-handler.ts) on a
+# timer — there's no in-process cron host in Next.js, and this avoids
+# committing to any one hosting platform's own cron product before a
+# deployment target is chosen.
+#
+# IMPORTANT — this workflow does nothing useful until two things are both
+# true:
+#   1. Two repository secrets are set (Settings -> Secrets and variables ->
+#      Actions): APP_URL (the deployed app's base URL) and CRON_SECRET
+#      (must match the app's own CRON_SECRET env var exactly).
+#   2. This workflow is on the repository's default branch — GitHub only
+#      ever fires `schedule` triggers from the default branch, regardless
+#      of which branch the workflow file itself was added on. Until this
+#      is merged there, this file is inert (correct, but never runs).
+#
+# Can also be run on demand (workflow_dispatch) to test it once both
+# secrets are configured, without waiting for the schedule.
+on:
+  schedule:
+    - cron: '0 * * * *' # hourly, matching the original NestJS backend's @Cron(CronExpression.EVERY_HOUR)
+  workflow_dispatch: {}
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required secrets are configured
+        run: |
+          if [ -z "${{ secrets.APP_URL }}" ] || [ -z "${{ secrets.CRON_SECRET }}" ]; then
+            echo "::warning::APP_URL and/or CRON_SECRET repository secrets are not set yet — skipping (see this workflow file's header comment)."
+            echo "skip=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Clean up expired auth artifacts
+        if: env.skip != 'true'
+        run: |
+          curl -sf -X POST "${{ secrets.APP_URL }}/api/cron/cleanup-auth-artifacts" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+
+      - name: Purge soft-deleted applications past their retention window
+        if: env.skip != 'true'
+        run: |
+          curl -sf -X POST "${{ secrets.APP_URL }}/api/cron/purge-applications" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
