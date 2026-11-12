@@ -105,6 +105,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
         error: 'Error',
         path,
         timestamp: new Date().toISOString(),
+        requestId: null,
       };
     }
     throw new ApiError(finalRes.status, body);
@@ -125,3 +126,7 @@ export const apiPatch = <T>(path: string, body?: unknown) =>
   apiFetch<T>(path, { method: 'PATCH', body: body !== undefined ? JSON.stringify(body) : undefined });
 
 export const apiDelete = <T>(path: string) => apiFetch<T>(path, { method: 'DELETE' });
+
+/** Multipart upload (Documents create/new-version) — rawRequest already skips the JSON Content-Type for FormData bodies. */
+export const apiPostForm = <T>(path: string, formData: FormData) =>
+  apiFetch<T>(path, { method: 'POST', body: formData });
