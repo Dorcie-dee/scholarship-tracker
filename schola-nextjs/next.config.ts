@@ -12,9 +12,15 @@ import type { NextConfig } from 'next';
  * downloads). Tightening `script-src`/`style-src` to a nonce is a good
  * follow-up once there's a way to validate it against the real rendered app.
  */
+/**
+ * `unsafe-eval` is added to `script-src` in development ONLY — React's dev
+ * tooling (better error stack traces, Fast Refresh) calls `eval()`
+ * internally; production React never does. Loosening this in production
+ * would defeat the point of having the CSP, so it must stay dev-only.
+ */
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV !== 'production' ? " 'unsafe-eval'" : ''}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' blob: data: https://res.cloudinary.com",
   "font-src 'self' data:",
@@ -40,6 +46,15 @@ const SECURITY_HEADERS = [
 const nextConfig: NextConfig = {
   devIndicators: false,
   serverExternalPackages: ['mongoose', 'mongodb-memory-server'],
+  // This folder is its own project, not part of a workspace — pinned
+  // explicitly because Turbopack otherwise infers the root by walking up
+  // for the nearest lockfile, and picks the wrong directory if a stray
+  // lockfile (e.g. from an accidental `yarn install` one level up, in the
+  // parent folder that also holds the separate backend/ project) ever
+  // exists above this one.
+  turbopack: {
+    root: import.meta.dirname,
+  },
   async headers() {
     return [{ source: '/:path*', headers: SECURITY_HEADERS }];
   },
